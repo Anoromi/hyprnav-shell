@@ -110,6 +110,29 @@ Singleton {
     function lock(env, cb) { request("lock_set", { env: env }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
     function unlock(cb) { request("lock_clear", {}, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
 
+    // Slot and environment mutations used by the grid palette.
+    function slotTempCreate(env, name, cb) { request("slot_temp_create", { env: env, cwd: null, name: name || null, owner: "grid", client: null, launch_argv: null }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
+    function slotRemove(env, slot, cb) { request("slot_remove", { env: env, slot: slot, name: null }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
+    function slotRename(env, slot, name, cb) { request(name ? "slot_name_set" : "slot_name_clear", name ? { env: env, slot: slot, name: name } : { env: env, slot: slot }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
+    function slotCommandSet(env, slot, argv, cb) { request("slot_command_set", { env: env, slot: slot, argv: argv, display_name: null }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
+    function slotCommandClear(env, slot, cb) { request("slot_command_clear", { env: env, slot: slot }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
+    function envTitleSet(env, title, cb) { request("env_title_set", { env: env, title: title }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
+    function envDelete(env, cb) { request("env_delete", { env: env }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
+    function stickRelease(workspaceId, cb) {
+        request("stick_list", {}, (res, err) => {
+            if (!res) { if (cb) cb(null, err); return; }
+            const hits = (res.persisted || []).filter(s => s.workspace_id === workspaceId);
+            let left = hits.length; if (left === 0) { refreshAll(); if (cb) cb({ released: 0 }, null); return; }
+            for (const h of hits) request("stick_release", { stick_id: h.stick_id }, () => { if (--left === 0) { refreshAll(); if (cb) cb({ released: hits.length }, null); } });
+        });
+    }
+    // Split a command line on spaces, honouring double quotes.
+    function splitArgv(text) {
+        const out = []; let cur = ""; let q = false;
+        for (const ch of text) { if (ch === '"') q = !q; else if (ch === " " && !q) { if (cur) out.push(cur); cur = ""; } else cur += ch; }
+        if (cur) out.push(cur); return out;
+    }
+
     readonly property string lockedEnv: status && status.locked_environment_id ? status.locked_environment_id : ""
 
     // Rows derived from the grid snapshot, for the grid overlay and the bar.

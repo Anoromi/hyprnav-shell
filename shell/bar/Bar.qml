@@ -80,7 +80,7 @@ PanelWindow {
         }
         Item { width: 1; height: Theme.s4 }
         Repeater {
-            model: bar.roll.filter(c => !c.active)
+            model: bar.roll.filter(c => !c.active && !c.unnumbered)
             Rectangle {
                 id: pip
                 required property var modelData

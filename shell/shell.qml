@@ -2,6 +2,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 import "services" as Services
 import "switcher"
 import "grid"
@@ -64,6 +65,11 @@ ShellRoot {
         function activate(): void { root.gridWin()?.activate(); }
         function lock(): void { root.gridWin()?.toggleLock(); }
         function move(dr: int, dc: int): void { root.gridWin()?.move(dr, dc); }
+        function action(id: string, text: string): void { root.gridWin()?.runAction({ id: id }, text); }
+        function palette(): void { root.gridWin()?.togglePalette(); }
+        function windows(ws: int): string { const g = root.gridWin(); if (!g) return "[]"; return JSON.stringify(g.windowsOn(ws).map(t => ({ address: String(t.address), ws: t.workspace ? t.workspace.id : null, title: t.title }))); }
+        function toplevels(): string { return JSON.stringify(Hyprland.toplevels.values.map(t => ({ address: String(t.address), ws: t.workspace ? t.workspace.id : null, title: t.title }))); }
+        function dispatch(cmd: string): void { root.gridWin()?.dispatch(cmd); }
         function state(): string { const g = root.gridWin(); return g ? JSON.stringify({ phase: g.phase, row: g.selRow, col: g.selCol }) : "none"; }
     }
 

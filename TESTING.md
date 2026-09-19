@@ -47,3 +47,16 @@ Shell fix found by that work: `WorkspaceThumb` kept a `ScreencopyView` bound
 to a toplevel even while the overlay was hidden. When such a toplevel closed,
 the compositor sent an invalid-object error and Quickshell's Wayland
 connection died. The capture source is now null unless the overlay is shown.
+
+## Temporary slots and palette (2026-09-20)
+
+`scripts/temp-slots-demo.sh` records `recordings/temp-slots.mp4`: Ctrl+P
+palette, "New temporary slot and run…" with kitty, End to reach the new
+frame, rename, close all windows, the 30 s empty timer, release. Evidence
+table in the hyprnav repo (`TEMP-SLOTS-TESTING.md`).
+
+Lessons: `Hyprland.dispatch` from Quickshell does not carry Lua dispatcher
+calls on 0.56; the grid runs `hyprctl dispatch` as a `Process`. `Palette` is a
+Qt type name, so the component is `CommandPalette`. Window actions read
+`hyprctl -j clients` rather than Quickshell's toplevel cache, and the plugin
+now emits move events so that cache stays right for stuck windows.

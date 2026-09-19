@@ -3,6 +3,8 @@ import QtQuick
 import QtQuick.Shapes
 import Quickshell
 import Quickshell.Wayland
+import Quickshell.Hyprland
+import Quickshell.Io
 import "../services" as Services
 import ".."
 
@@ -57,6 +59,7 @@ PanelWindow {
         Services.Hyprnav.gotoSlot(cell.environment_id, cell.slot_index);
         finish.interval = Theme.reducedMotion ? 0 : 140; finish.restart();
     }
+    function togglePalette() { if (palette.open) palette.hide(); else palette.show(); }
     function toggleLock() {
         const row = selectedRow; if (!row) return;
         if (row.locked) Services.Hyprnav.unlock(); else Services.Hyprnav.lock(row.envId);
@@ -88,12 +91,16 @@ PanelWindow {
         anchors.fill: parent
         focus: true
         Keys.onPressed: ev => {
+            if (ev.key === Qt.Key_P && (ev.modifiers & Qt.ControlModifier)) { if (palette.open) palette.hide(); else palette.show(); ev.accepted = true; return; }
+            if (palette.open) return;
             switch (ev.key) {
-            case Qt.Key_Right: case Qt.Key_L: if (ev.modifiers & Qt.ShiftModifier) win.toggleLock(); else win.move(0, 1); break;
+            case Qt.Key_Right: case Qt.Key_L: win.move(0, 1); break;
             case Qt.Key_Left: case Qt.Key_H: win.move(0, -1); break;
             case Qt.Key_Down: case Qt.Key_J: win.move(1, 0); break;
             case Qt.Key_Up: case Qt.Key_K: win.move(-1, 0); break;
             case Qt.Key_Tab: win.move(0, 1); break;
+            case Qt.Key_End: win.move(0, 99); break;
+            case Qt.Key_Home: win.move(0, -99); break;
             case Qt.Key_Backtab: win.move(0, -1); break;
             case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Space: win.activate(); break;
             case Qt.Key_Escape: win.close(); break;
@@ -173,11 +180,11 @@ PanelWindow {
                         width: win.cellW; height: win.cellH
                         radius: Theme.rFrame
                         color: cellItem.hasWindows ? Theme.sheet : Theme.emulsion
-                        border.width: cellItem.modelData.inherited ? 0 : 1
+                        border.width: cellItem.modelData.inherited || cellItem.modelData.temporary ? 0 : 1
                         border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, cellItem.hasWindows ? 0.35 : 0.12)
                         Shape {
                             anchors.fill: parent
-                            visible: cellItem.modelData.inherited
+                            visible: cellItem.modelData.inherited || cellItem.modelData.temporary
                             ShapePath {
                                 strokeColor: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.4)
                                 strokeWidth: 1
@@ -206,7 +213,8 @@ PanelWindow {
                             size: 14
                             color: Theme.pencil
                         }
-                        // Frame number, film-edge style
+                        // Frame number, film-edge style. Temporary slots have no
+                        // number: they carry their name in Casual instead.
                         Rectangle {
                             x: 6; y: 6
                             width: num.implicitWidth + 10; height: 20
@@ -216,9 +224,23 @@ PanelWindow {
                             Text {
                                 id: num
                                 anchors.centerIn: parent
-                                text: cellItem.modelData.slot_index
+                                text: cellItem.modelData.unnumbered ? cellItem.modelData.workspace_name : cellItem.modelData.slot_index
                                 color: cellItem.isSelected ? Theme.darkroom : Theme.paper
-                                font.family: Theme.mono; font.pixelSize: Theme.fs13; font.weight: Font.Medium
+                                font.family: cellItem.modelData.unnumbered ? Theme.casual : Theme.mono
+                                font.pixelSize: Theme.fs13; font.weight: Font.Medium
+                            }
+                        }
+                        // Temporary slot empty timer
+                        Row {
+                            anchors.left: parent.left; anchors.bottom: parent.bottom
+                            anchors.leftMargin: 6; anchors.bottomMargin: 6
+                            spacing: 4
+                            visible: cellItem.modelData.temporary === true && cellItem.modelData.empty_for_ms !== null && cellItem.modelData.empty_for_ms !== undefined
+                            Glyph { text: "󰔟"; size: 12; color: Theme.fixer }
+                            Text {
+                                text: "empty " + Math.round((cellItem.modelData.empty_for_ms || 0) / 1000) + " s, gone at 30"
+                                color: Theme.fixer
+                                font.family: Theme.sans; font.pixelSize: Theme.fs12
                             }
                         }
                         MouseArea {
@@ -233,7 +255,7 @@ PanelWindow {
                         spacing: Theme.s8
                         Text {
                             width: win.cellW - (cellItem.modelData.active ? 50 : 0)
-                            text: cellItem.modelData.slot_display_name
+                            text: cellItem.modelData.unnumbered ? ("temporary" + (cellItem.modelData.owner ? ", by " + cellItem.modelData.owner : "")) : cellItem.modelData.slot_display_name
                             elide: Text.ElideRight
                             color: cellItem.isSelected ? Theme.paper : Theme.fixer
                             font.family: Theme.sans; font.pixelSize: Theme.fs13
@@ -274,11 +296,112 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: Theme.tFast } }
     }
 
+    // Command palette
+    CommandPalette {
+        id: palette
+        anchors.centerIn: parent
+        actions: win.paletteActions()
+        onRun: (action, text) => win.runAction(action, text)
+        onOpenChanged: if (!open) keys.forceActiveFocus()
+    }
+    readonly property var paletteActions: function() {
+        const cell = win.selectedCell; const row = win.selectedRow;
+        const list = [];
+        if (cell) {
+            list.push({ id: "open", scope: "frame", title: "Open frame" });
+            list.push({ id: "slot-remove", scope: "frame", title: cell.temporary ? "Remove temporary slot" : "Remove slot" });
+            list.push({ id: "slot-rename", scope: "frame", title: "Rename slot", needsText: true, prompt: "New name", defaultText: cell.slot_display_name });
+            list.push({ id: "slot-command", scope: "frame", title: "Set launch command", needsText: true, prompt: "Command", defaultText: "" });
+            list.push({ id: "slot-command-clear", scope: "frame", title: "Clear launch command" });
+            if (cell.stuck) list.push({ id: "stick-release", scope: "frame", title: "Release stuck tree" });
+            if (cell.window_count > 0) list.push({ id: "close-all", scope: "frame", title: "Close all windows here" });
+            if (cell.window_count > 0) list.push({ id: "move-windows", scope: "frame", title: "Move windows to slot…", needsText: true, prompt: "Slot number or name", defaultText: "" });
+        }
+        if (row) {
+            list.push({ id: "temp-new", scope: "roll", title: "New temporary slot" });
+            list.push({ id: "temp-run", scope: "roll", title: "New temporary slot and run…", needsText: true, prompt: "Command", defaultText: "" });
+            list.push({ id: "env-rename", scope: "roll", title: "Rename environment", needsText: true, prompt: "Title", defaultText: row.title });
+            list.push({ id: "lock", scope: "roll", title: row.locked ? "Unlock environment" : "Lock environment" });
+            if (row.cells.every(c => c.window_count === 0)) list.push({ id: "env-delete", scope: "roll", title: "Delete environment" });
+        }
+        list.push({ id: "goto-locked", scope: "everywhere", title: "Go to locked environment" });
+        list.push({ id: "refresh", scope: "everywhere", title: "Refresh" });
+        return list;
+    }
+    function windowsOn(workspaceId) {
+        return Hyprland.toplevels.values.filter(t => t.workspace && t.workspace.id === workspaceId);
+    }
+    // Ask the compositor directly which windows sit on a workspace. Quickshell's
+    // toplevel cache can lag behind windows the stick manager moved at open.
+    function withWindowsOn(workspaceId, cb) {
+        const proc = clientsRunner.createObject(win, { command: ["hyprctl", "-j", "clients"], workspaceId: workspaceId, callback: cb });
+        proc.running = true;
+    }
+    Component {
+        id: clientsRunner
+        Process {
+            property int workspaceId: -1
+            property var callback: null
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    let list = [];
+                    try { list = JSON.parse(text).filter(c => c.workspace && c.workspace.id === workspaceId && c.mapped).map(c => c.address); } catch (e) { console.log("clients parse failed", e); }
+                    if (callback) callback(list);
+                }
+            }
+            onExited: destroy()
+        }
+    }
+    // Hyprland wants "address:0x…"; Quickshell reports the hex without the prefix.
+    function addr(t) { const a = String(t.address); return "address:" + (a.startsWith("0x") ? a : "0x" + a); }
+    // Quickshell's Hyprland.dispatch does not carry Lua dispatcher calls
+    // reliably on 0.56; hyprctl does.
+    function dispatch(cmd) {
+        const proc = hyprctlRunner.createObject(win, { command: ["hyprctl", "dispatch", cmd] });
+        proc.running = true;
+    }
+    Component {
+        id: hyprctlRunner
+        Process {
+            stdout: StdioCollector { onStreamFinished: if (text.trim() !== "ok" && text.trim() !== "") console.log("hyprctl:", text.trim()) }
+            stderr: StdioCollector { onStreamFinished: if (text.trim() !== "") console.log("hyprctl error:", text.trim()) }
+            onExited: (code) => { if (code !== 0) console.log("hyprctl exit", code, JSON.stringify(command)); destroy(); }
+            stdinEnabled: false
+        }
+    }
+    function runAction(action, text) {
+        const cell = win.selectedCell; const row = win.selectedRow;
+        switch (action.id) {
+        case "open": win.activate(); break;
+        case "slot-remove": if (cell) Services.Hyprnav.slotRemove(cell.binding_environment_id || cell.environment_id, cell.slot_index); break;
+        case "slot-rename": if (cell) Services.Hyprnav.slotRename(cell.binding_environment_id || cell.environment_id, cell.slot_index, text.trim()); break;
+        case "slot-command": if (cell && text.trim()) Services.Hyprnav.slotCommandSet(cell.environment_id, cell.slot_index, Services.Hyprnav.splitArgv(text.trim())); break;
+        case "slot-command-clear": if (cell) Services.Hyprnav.slotCommandClear(cell.environment_id, cell.slot_index); break;
+        case "stick-release": if (cell) Services.Hyprnav.stickRelease(cell.physical_workspace_id); break;
+        case "close-all": if (cell) withWindowsOn(cell.physical_workspace_id, list => { for (const a of list) dispatch("hl.dsp.window.kill({ window = \"address:" + a + "\" })"); }); break;
+        case "move-windows": {
+            if (!cell || !row) break;
+            const q = text.trim().toLowerCase();
+            const target = row.cells.find(c => String(c.slot_index) === q || (c.slot_display_name || "").toLowerCase() === q);
+            if (!target) break;
+            withWindowsOn(cell.physical_workspace_id, list => { for (const a of list) dispatch("hl.dsp.window.move({ window = \"address:" + a + "\", workspace = \"" + target.physical_workspace_id + " silent\" })"); });
+            break;
+        }
+        case "temp-new": if (row) Services.Hyprnav.slotTempCreate(row.envId, null); break;
+        case "temp-run": if (row && text.trim()) Services.Hyprnav.slotTempCreate(row.envId, null, (res) => { if (res && res.physical_workspace_id) Quickshell.execDetached(["hyprnav", "spawn", "--no-focus", String(res.physical_workspace_id), "--"].concat(Services.Hyprnav.splitArgv(text.trim()))); }); break;
+        case "env-rename": if (row && text.trim()) Services.Hyprnav.envTitleSet(row.envId, text.trim()); break;
+        case "lock": win.toggleLock(); break;
+        case "env-delete": if (row) Services.Hyprnav.envDelete(row.envId); break;
+        case "goto-locked": { const lockedRow = win.rows.findIndex(r => r.locked); if (lockedRow >= 0) { win.selRow = lockedRow; win.selCol = 0; } break; }
+        case "refresh": Services.Hyprnav.refreshAll(); break;
+        }
+    }
+
     // Key hints, bottom left
     Text {
         x: win.inset
         y: win.height - 60
-        text: "Enter opens the frame.  Shift+L locks the roll.  Esc closes.  󰐃 means a spawned tree is stuck to that frame."
+        text: "Enter opens the frame.  Ctrl+P for actions.  Esc closes.  󰐃 marks a stuck tree."
         color: Theme.fixer
         font.family: Theme.sans; font.pixelSize: Theme.fs13
         opacity: win.phase === "open" ? 0.8 : 0

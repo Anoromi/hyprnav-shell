@@ -147,7 +147,8 @@ PanelWindow {
                 anchors.left: frame.left
                 spacing: Theme.s8
                 Text {
-                    text: card.cell ? card.cell.slot_index : (card.index + 1)
+                    text: card.cell ? (card.cell.unnumbered ? "" : card.cell.slot_index) : (card.index + 1)
+                    visible: text !== ""
                     color: card.isSelected ? Theme.pencil : Theme.fixer
                     font.family: Theme.mono; font.pixelSize: Theme.fs15; font.weight: Font.Medium
                     Behavior on color { ColorAnimation { duration: Theme.tFast } }
