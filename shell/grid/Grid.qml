@@ -65,6 +65,9 @@ PanelWindow {
         if (row.locked) Services.Hyprnav.unlock(); else Services.Hyprnav.lock(row.envId);
     }
     Timer { id: finish; onTriggered: { win.open = false; win.phase = "closed"; } }
+    // Temporary slots change on their own (empty timers, releases), so poll
+    // the daemon while the grid is open.
+    Timer { interval: 2000; repeat: true; running: win.phase === "open"; onTriggered: Services.Hyprnav.refreshGrid() }
 
     // Geometry
     readonly property int inset: 160
