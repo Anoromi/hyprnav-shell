@@ -1,0 +1,68 @@
+pragma Singleton
+import QtQuick
+import Quickshell
+
+Singleton {
+    id: theme
+
+    // Palette: a photographer's contact sheet.
+    readonly property color darkroom: "#1A1917"
+    readonly property color sheet: "#262421"
+    readonly property color emulsion: "#3A3733"
+    readonly property color paper: "#EDE6DA"
+    readonly property color pencil: "#F2C14E"
+    readonly property color fixer: "#9A938A"
+    readonly property color good: "#8FBF7F"
+    readonly property color warn: "#E06C4B"
+    readonly property color scrim: Qt.rgba(0.102, 0.098, 0.090, 0.9)
+
+    // Icon lookup that never asks for an empty name.
+    function appIcon(cls) {
+        if (!cls) return Quickshell.iconPath("application-x-executable");
+        const entry = DesktopEntries.heuristicLookup(cls);
+        if (entry && entry.icon) return Quickshell.iconPath(entry.icon, "application-x-executable");
+        return Quickshell.iconPath(cls, "application-x-executable");
+    }
+
+    FontLoader { id: sansRegular; source: Qt.resolvedUrl("fonts/RecursiveSansLnrSt-Regular.ttf") }
+    FontLoader { id: sansMed; source: Qt.resolvedUrl("fonts/RecursiveSansLnrSt-Med.ttf") }
+    FontLoader { id: sansSemi; source: Qt.resolvedUrl("fonts/RecursiveSansLnrSt-SemiBold.ttf") }
+    FontLoader { id: sansBold; source: Qt.resolvedUrl("fonts/RecursiveSansLnrSt-Bold.ttf") }
+    FontLoader { id: cslMed; source: Qt.resolvedUrl("fonts/RecursiveSansCslSt-Med.ttf") }
+    FontLoader { id: cslBold; source: Qt.resolvedUrl("fonts/RecursiveSansCslSt-Bold.ttf") }
+    FontLoader { id: monoRegular; source: Qt.resolvedUrl("fonts/RecursiveMonoLnrSt-Regular.ttf") }
+    FontLoader { id: monoMed; source: Qt.resolvedUrl("fonts/RecursiveMonoLnrSt-Med.ttf") }
+    FontLoader { id: monoBold; source: Qt.resolvedUrl("fonts/RecursiveMonoLnrSt-Bold.ttf") }
+
+    readonly property string sans: sansRegular.status === FontLoader.Ready ? sansRegular.name : "sans-serif"
+    readonly property string casual: cslMed.status === FontLoader.Ready ? cslMed.name : sans
+    readonly property string mono: monoMed.status === FontLoader.Ready ? monoMed.name : "monospace"
+
+    // Type scale
+    readonly property int fs12: 12
+    readonly property int fs13: 13
+    readonly property int fs15: 15
+    readonly property int fs18: 18
+    readonly property int fs22: 22
+    readonly property int fs40: 40
+
+    // Space and shape
+    readonly property int s4: 4
+    readonly property int s8: 8
+    readonly property int s12: 12
+    readonly property int s16: 16
+    readonly property int s24: 24
+    readonly property int s32: 32
+    readonly property int rFrame: 3      // thumbnails: nearly square, like a print
+    readonly property int rSheet: 10     // panels
+    readonly property int ringWidth: 3
+
+    // Motion
+    readonly property bool reducedMotion: Quickshell.env("HNS_REDUCED_MOTION") === "1"
+    readonly property int tFast: reducedMotion ? 0 : 90
+    readonly property int tScrim: reducedMotion ? 0 : 120
+    readonly property int tRise: reducedMotion ? 0 : 160
+    readonly property int tStagger: reducedMotion ? 0 : 12
+    readonly property real springStiffness: 320
+    readonly property real springDamping: 26
+}

@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""Disposable compositor for developing and recording hyprnav-shell.
+
+Cage (headless wlroots) hosts a nested Hyprland with a headless TEST output at
+1920x1080. The nested session has its own runtime dir, D-Bus, hyprnav daemon
+and state, so nothing touches the live desktop. Commands:
+
+  lab.py up        start everything and print the env file
+  lab.py down      stop everything
+  lab.py env       print `export` lines for the nested session
+  lab.py exec CMD  run CMD inside the nested session
+"""
+import json, os, shlex, signal, subprocess, sys, tempfile, time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LAB = ROOT / "lab"
+LAB.mkdir(exist_ok=True)
+TOOLS = ROOT / "lab-tools/result/bin"   # built by: nix-build lab-tools -o lab-tools/result
+CAGE = TOOLS / "cage"
+PIDS = LAB / "pids.json"
+ENVF = LAB / "env.json"
+OUTPUT = "TEST"
+
+def load_env():
+    return json.loads(ENVF.read_text())
+
+def launch(name, args, env, procs):
+    p = subprocess.Popen(args, env=env, stdout=(LAB / f"{name}.log").open("w"),
+                         stderr=subprocess.STDOUT, start_new_session=True)
+    procs[name] = p.pid
+    PIDS.write_text(json.dumps(procs, indent=2))
+    return p
+
+def wait(check, p, what, tries=150):
+    for _ in range(tries):
+        if check():
+            return
+        if p.poll() is not None:
+            raise RuntimeError(f"{what}: process exited, see lab/*.log")
+        time.sleep(0.1)
+    raise RuntimeError(f"{what}: timeout")
+
+def up():
+    if not CAGE.exists():
+        raise SystemExit("lab tools missing: run  nix-build lab-tools -o lab-tools/result")
+    if PIDS.exists():
+        down()
+    runtime = Path(tempfile.mkdtemp(prefix="hns-lab-"))
+    env = {k: os.environ[k] for k in ("PATH", "XDG_DATA_DIRS", "LD_LIBRARY_PATH", "HOME", "USER", "LANG", "SHELL", "TERM") if k in os.environ}
+    env.update(
+        XDG_RUNTIME_DIR=str(runtime), XDG_CONFIG_HOME=str(LAB / "config"),
+        XDG_STATE_HOME=str(LAB / "state"), XDG_CACHE_HOME=str(LAB / "cache"),
+        HYPRLAND_NO_SD_VARS="1", LIBSEAT_BACKEND="hns-disabled",
+        AQ_DRM_DEVICES="/nonexistent-hns-device",
+        WLR_BACKENDS="headless", WLR_RENDERER="gles2", WLR_HEADLESS_OUTPUTS="1",
+        GDK_BACKEND="wayland", QT_QPA_PLATFORM="wayland", MOZ_ENABLE_WAYLAND="1",
+        XCURSOR_THEME="Adwaita", XCURSOR_SIZE="24", HNS_SCREEN=OUTPUT,
+        PIPEWIRE_RUNTIME_DIR=os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"),
+        PULSE_RUNTIME_PATH=os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000") + "/pulse",
+    )
+    for d in ("config", "state", "cache"):
+        (LAB / d).mkdir(exist_ok=True)
+    procs = {}
+    cage = launch("cage", [str(CAGE), "-s", "--", "sleep", "7200"], env, procs)
+    wait(lambda: bool(list(runtime.glob("wayland-*.lock"))), cage, "cage")
+    parent = next(runtime.glob("wayland-*.lock")).name.removesuffix(".lock")
+    bus = subprocess.Popen(["dbus-daemon", "--session", "--nofork", "--print-address=1"], env=env,
+                           stdout=subprocess.PIPE, stderr=(LAB / "dbus.log").open("w"), text=True, start_new_session=True)
+    procs["dbus"] = bus.pid
+    env["DBUS_SESSION_BUS_ADDRESS"] = bus.stdout.readline().strip()
+    env["WAYLAND_DISPLAY"] = parent
+    (LAB / "config/hypr").mkdir(parents=True, exist_ok=True)
+    # Lua config, like the user's live session: hyprnav's daemon dispatches
+    # Lua-style calls (hl.dsp.focus), which a hyprlang config rejects.
+    conf = LAB / "config/hypr/hyprland.lua"
+    conf.write_text(f"""
+hl.monitor({{ output = "", mode = "1280x720@60", position = "0x0", scale = 1 }})
+hl.monitor({{ output = "{OUTPUT}", mode = "1920x1080@60", position = "0x0", scale = 1 }})
+hl.monitor({{ output = "WAYLAND-1", disabled = true }})
+hl.config({{
+    general = {{
+        gaps_in = 4, gaps_out = 8, border_size = 1,
+        col = {{ active_border = "rgba(EDE6DAcc)", inactive_border = "rgba(3A3733aa)" }},
+        layout = "dwindle",
+    }},
+    decoration = {{ rounding = 4, blur = {{ enabled = false }}, shadow = {{ enabled = false }} }},
+    animations = {{ enabled = true }},
+    misc = {{ disable_hyprland_logo = true, disable_splash_rendering = true, background_color = 0x1A1917 }},
+    cursor = {{ inactive_timeout = 1 }},
+    xwayland = {{ enabled = false }},
+    debug = {{ suppress_errors = true }},
+}})
+hl.window_rule({{
+    name = "approval-floats",
+    match = {{ title = "^Approval needed$" }},
+    float = true,
+    center = true,
+    size = "620 320",
+}})
+""")
+    old = {x.name for x in (runtime / "hypr").glob("*")} if (runtime / "hypr").exists() else set()
+    hl = launch("hyprland", ["Hyprland", "--config", str(conf)], env, procs)
+    def new_socket():
+        return [x for x in (runtime / "hypr").glob("*/.socket.sock") if x.parent.name not in old] if (runtime / "hypr").exists() else []
+    wait(lambda: bool(new_socket()), hl, "hyprland")
+    env["HYPRLAND_INSTANCE_SIGNATURE"] = new_socket()[0].parent.name
+    time.sleep(0.5)
+    socks = [x for x in runtime.glob("wayland-*") if not x.name.endswith(".lock") and x.name != parent]
+    assert len(socks) == 1, socks
+    env["WAYLAND_DISPLAY"] = socks[0].name
+    def hc(*a, tries=30):
+        for i in range(tries):
+            r = subprocess.run(["hyprctl", *a], env=env, capture_output=True, text=True)
+            if r.returncode == 0 and "Couldn't connect" not in r.stdout:
+                return r.stdout
+            time.sleep(0.3)
+        raise RuntimeError(f"hyprctl {a}: {r.stdout} {r.stderr}")
+    hc("version")
+    hc("output", "create", "headless", OUTPUT)
+    time.sleep(0.6)
+    hc("dispatch", f'hl.dsp.focus({{ monitor = "{OUTPUT}" }})')
+    hyprnav_bin = os.environ.get("HNS_HYPRNAV_BIN", "hyprnav")
+    if hyprnav_bin != "hyprnav":
+        env["PATH"] = str(Path(hyprnav_bin).resolve().parent) + ":" + env["PATH"]
+    ENVF.write_text(json.dumps(env, indent=2)); os.chmod(ENVF, 0o600)
+    # Virtual keyboard and pointer so layer surfaces can receive keyboard focus
+    # and wtype can inject keys.
+    launch("seat", [str(TOOLS / "hns-lab-seat")], env, procs)
+    # Optional dev builds: HNS_HYPRNAV_BIN points at a hyprnav binary,
+    # HNS_PLUGIN_SO at a hyprnav-plugin .so to load into the nested compositor.
+    plugin_so = os.environ.get("HNS_PLUGIN_SO")
+    if plugin_so:
+        print(hc("plugin", "load", plugin_so).strip())
+    nav = launch("hyprnav", [hyprnav_bin, "daemon"], env, procs)
+    time.sleep(0.8)
+    print(json.dumps({"runtime": str(runtime), "instance": env["HYPRLAND_INSTANCE_SIGNATURE"], "pids": procs}, indent=2))
+    print(hc("monitors"))
+
+def down():
+    if not PIDS.exists():
+        print("not running"); return
+    procs = json.loads(PIDS.read_text())
+    for name, pid in reversed(list(procs.items())):
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    time.sleep(1)
+    for name, pid in procs.items():
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    PIDS.unlink()
+    print("stopped")
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "up"
+    if cmd == "up": up()
+    elif cmd == "down": down()
+    elif cmd == "env":
+        for k, v in load_env().items(): print(f"export {k}={shlex.quote(v)}")
+    elif cmd == "exec":
+        os.execvpe(sys.argv[2], sys.argv[2:], load_env())
+    else:
+        print(__doc__)
+
+if __name__ == "__main__":
+    main()

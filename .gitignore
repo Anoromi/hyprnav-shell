@@ -1,0 +1,6 @@
+# disposable lab compositor state and runtime
+lab/
+# nix build output symlink
+lab-tools/result
+# recordings are published to ~/Artifacts; keep the repo light
+recordings/*.mp4
