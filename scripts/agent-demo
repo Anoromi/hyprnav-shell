@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run the demo agent app with the lab's GTK4 Python.
-HERE="$(cd "$(dirname "$0")/.." && pwd)"
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 T="$HERE/lab-tools/result"
 export GI_TYPELIB_PATH="$T/lib/girepository-1.0${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
 export XDG_DATA_DIRS="$T/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"

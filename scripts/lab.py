@@ -86,7 +86,7 @@ hl.config({{
     }},
     decoration = {{ rounding = 4, blur = {{ enabled = false }}, shadow = {{ enabled = false }} }},
     animations = {{ enabled = true }},
-    misc = {{ disable_hyprland_logo = true, disable_splash_rendering = true, background_color = 0x1A1917 }},
+    misc = {{ disable_hyprland_logo = true, disable_splash_rendering = true, background_color = 0x1A1917, enable_anr_dialog = false }},
     cursor = {{ inactive_timeout = 1 }},
     xwayland = {{ enabled = false }},
     debug = {{ suppress_errors = true }},

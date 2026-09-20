@@ -35,6 +35,8 @@ keep["mcpServers"] = {"cua_repl": {"type": "stdio", "command": launcher, "args":
 keep["projects"] = {}
 json.dump(keep, open(dst, "w"), indent=2)
 PY
+    # Toolchain from the live dev session's nix develop shell (pkg-config, libsecret, gcc).
+    [ -f "$HERE/lab/t3-buildenv.sh" ] && source "$HERE/lab/t3-buildenv.sh"
     export HOME="$LABHOME"
     export XDG_CONFIG_HOME="$LABHOME/.config" XDG_DATA_HOME="$LABHOME/.local/share" XDG_STATE_HOME="$LABHOME/.local/state" XDG_CACHE_HOME="$LABHOME/.cache"
     mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
