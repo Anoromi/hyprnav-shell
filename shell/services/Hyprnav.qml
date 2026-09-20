@@ -10,6 +10,7 @@ Singleton {
     id: root
 
     property string socketPath: ""
+    property string eventsSocketPath: ""
     property bool connected: false
     property var grid: null          // GridSnapshot
     property var switcher: null      // SwitcherSnapshot
@@ -18,6 +19,12 @@ Singleton {
 
     signal gridUpdated()
     signal switcherUpdated()
+
+    // Push events from the daemon's events.sock. `agents` carries the full
+    // registry, `slots` is a bare marker meaning "re-read the grid snapshot".
+    property var agents: []
+    signal agentsEvent(var agents)
+    signal slotsEvent()
 
     property var _queue: []
     property var _inflight: null
@@ -82,7 +89,43 @@ Singleton {
         }
         onError: err => { root.lastError = "socket: " + err; }
     }
-    onSocketPathChanged: if (socketPath !== "") { connected = true; refreshAll(); }
+    onSocketPathChanged: if (socketPath !== "") {
+        connected = true;
+        eventsSocketPath = socketPath.replace(/hyprnav\.sock$/, "events.sock");
+        refreshAll();
+    }
+
+    // Event stream. Unlike the request socket this one is multi-client and
+    // write-only on the daemon side, so holding it open blocks nobody.
+    function _handleEvent(line) {
+        let ev = null;
+        try { ev = JSON.parse(line); } catch (e) { return; }
+        if (!ev || !ev.event) return;
+        if (ev.event === "agents") {
+            root.agents = ev.agents || [];
+            root.agentsEvent(root.agents);
+        } else if (ev.event === "slots") {
+            root.slotsEvent();
+            refreshDebounce.restart();
+        }
+    }
+
+    Socket {
+        id: eventsSock
+        path: root.eventsSocketPath
+        parser: SplitParser { splitMarker: "\n"; onRead: data => root._handleEvent(data) }
+        onConnectionStateChanged: if (!connected && root.eventsSocketPath !== "") eventsRetry.restart()
+        // A missing socket (daemon not up yet, or restarted) surfaces as an
+        // error rather than a state change, so retry from here too.
+        onError: err => { root.lastError = "events socket: " + err; eventsRetry.restart(); }
+    }
+    // The daemon may restart under us; keep trying.
+    Timer {
+        id: eventsRetry
+        interval: 2000
+        onTriggered: if (!eventsSock.connected && root.eventsSocketPath !== "") eventsSock.connected = true
+    }
+    onEventsSocketPathChanged: if (eventsSocketPath !== "") eventsSock.connected = true
 
     // Locate the daemon socket: $XDG_RUNTIME_DIR/hx/<fnv1a64(instance)>/hyprnav.sock
     Process {

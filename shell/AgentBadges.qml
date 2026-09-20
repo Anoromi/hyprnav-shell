@@ -3,7 +3,6 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
-import Quickshell.Io
 import "services" as Services
 
 // Marks windows an agent is currently driving: a small pencil tag at the
@@ -21,20 +20,36 @@ PanelWindow {
     WlrLayershell.namespace: "hyprnav-shell-agent-badges"
     visible: badges.count > 0
 
-    property var agents: []        // from hyprnav agents_list
-    property var clients: []       // from hyprctl -j clients, mapped on this screen's active workspace
+    // The daemon pushes the whole registry on every change; no polling.
+    readonly property var agents: Services.Hyprnav.agents
 
-    // Poll the registry while any agent exists; cheap when none do.
-    Timer {
-        interval: 1000; repeat: true; running: true
-        onTriggered: Services.Hyprnav.request("agents_list", {}, res => { if (res) win.agents = res; })
+    // Window geometry straight from Quickshell's toplevel cache, which holds
+    // the same objects `hyprctl -j clients` returns. The cache is refreshed on
+    // the compositor events that can move or unmap a window, never on a timer.
+    readonly property var clients: {
+        const out = [];
+        for (const t of Hyprland.toplevels.values) {
+            const o = t.lastIpcObject;
+            if (o && o.address) out.push(o);
+        }
+        return out;
     }
-    // Window geometry from the compositor, refreshed with the agents.
-    onAgentsChanged: if (agents.length > 0) clientsProc.running = true; else clients = []
-    Process {
-        id: clientsProc
-        command: ["hyprctl", "-j", "clients"]
-        stdout: StdioCollector { onStreamFinished: { try { win.clients = JSON.parse(text); } catch (e) {} } }
+
+    Connections {
+        target: Services.Hyprnav
+        function onAgentsEvent(agents) { Hyprland.refreshToplevels(); }
+    }
+    Connections {
+        target: Hyprland
+        function onRawEvent(ev) {
+            switch (ev.name) {
+            case "openwindow": case "closewindow": case "movewindow": case "movewindowv2":
+            case "changefloatingmode": case "fullscreen": case "workspace": case "workspacev2":
+            case "focusedmon": case "monitoradded":
+                Hyprland.refreshToplevels();
+                break;
+            }
+        }
     }
 
     readonly property var monitor: Hyprland.monitors.values.find(m => m.name === win.screen.name) ?? null

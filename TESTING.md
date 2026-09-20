@@ -60,3 +60,30 @@ calls on 0.56; the grid runs `hyprctl dispatch` as a `Process`. `Palette` is a
 Qt type name, so the component is `CommandPalette`. Window actions read
 `hyprctl -j clients` rather than Quickshell's toplevel cache, and the plugin
 now emits move events so that cache stays right for stuck windows.
+
+## Event-driven agent and slot state (2026-09-20)
+
+The daemon grew a push socket (`events.sock`, see the hyprnav repo's
+`EVENTS-TESTING.md` for the protocol evidence) and the shell stopped polling
+it. `services/Hyprnav.qml` holds one persistent connection to that socket and
+re-exposes it as `agents`, `agentsEvent` and `slotsEvent`; `AgentBadges.qml`
+lost its 1 s timer and its per-tick `hyprctl -j clients` run, and `Grid.qml`
+lost its 2 s refresh.
+
+| Check | How | Result |
+|---|---|---|
+| Badge on a driven window | `hyprnav agent register` + `agent beat --target <address>` on a lab kitty | badge and outline appear within a frame of the beat, no timer |
+| Badge removal | `hyprnav agent finish` | badge and outline gone |
+| Grid follows temporary slots | grid open, `hyprnav slot temp --name evgrid`, then `slot remove` | frame appears and disappears on `slots` events |
+| Reconnect | shell started while `events.sock` was missing, daemon restarted afterwards | shell picked the socket up on its own within the 2 s retry |
+| No regressions | switcher open/cancel, `run.sh ipc call nav ping`, bar | unchanged |
+
+Idle cost over 20 s with the grid closed, `/proc` CPU jiffies plus a `/proc`
+scan for `hyprctl` execs:
+
+| | shell CPU | `hyprctl` runs by the shell |
+|---|---|---|
+| before, no agents | 0.170 s | 13 |
+| before, one live agent | 0.230 s | 19 |
+| after, no agents | 0.010 s | 0 |
+| after, one live agent | 0.000 s | 0 |

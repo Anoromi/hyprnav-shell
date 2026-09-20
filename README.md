@@ -73,3 +73,10 @@ shell keeps one connection and queues requests. It uses `ui_snapshot_grid`,
 `ui_snapshot_switcher`, `status_get`, `workspace_goto`,
 `workspace_goto_physical`, `lock_set` and `lock_clear`, and refreshes on
 Hyprland `workspace`, `openwindow`, `closewindow`, `activewindow` events.
+
+Beside it the daemon opens `events.sock` in the same directory. That one is
+multi-client and write-only, so the shell holds a single connection to it for
+good and reconnects every 2 s if it drops. It carries `agents` (the whole
+registry, on every agent change) and `slots` (a bare "re-read the grid
+snapshot" marker), both coalesced to roughly one event per 50 ms. Agent badges
+and the grid follow that stream; nothing in the shell polls the daemon.

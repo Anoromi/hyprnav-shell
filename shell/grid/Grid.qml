@@ -65,9 +65,28 @@ PanelWindow {
         if (row.locked) Services.Hyprnav.unlock(); else Services.Hyprnav.lock(row.envId);
     }
     Timer { id: finish; onTriggered: { win.open = false; win.phase = "closed"; } }
-    // Temporary slots change on their own (empty timers, releases), so poll
-    // the daemon while the grid is open.
-    Timer { interval: 2000; repeat: true; running: win.phase === "open"; onTriggered: Services.Hyprnav.refreshGrid() }
+    // Temporary slots change on their own (empty timers, releases). The daemon
+    // pushes a `slots` event for each of those, so the grid follows the event
+    // stream instead of polling.
+    Connections {
+        target: Services.Hyprnav
+        enabled: win.phase === "open"
+        function onSlotsEvent() { Services.Hyprnav.refreshGrid(); }
+        function onAgentsEvent(agents) { Services.Hyprnav.refreshGrid(); }
+    }
+    // Windows opening and closing change the thumbnails and slot subtitles.
+    Connections {
+        target: Hyprland
+        enabled: win.phase === "open"
+        function onRawEvent(ev) {
+            switch (ev.name) {
+            case "openwindow": case "closewindow": case "movewindow": case "movewindowv2":
+            case "workspace": case "workspacev2": case "focusedmon":
+                Services.Hyprnav.refreshGrid();
+                break;
+            }
+        }
+    }
 
     // Geometry
     readonly property int inset: 160
