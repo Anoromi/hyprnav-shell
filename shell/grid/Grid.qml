@@ -233,12 +233,43 @@ PanelWindow {
                                 font.pixelSize: Theme.fs13; font.weight: Font.Medium
                             }
                         }
+                        // Agent status: who is working in this frame and what it did last.
+                        Row {
+                            anchors.left: parent.left; anchors.bottom: parent.bottom
+                            anchors.leftMargin: 6; anchors.bottomMargin: 6
+                            spacing: 6
+                            visible: cellItem.modelData.agent !== null && cellItem.modelData.agent !== undefined
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 8; height: 8; radius: 4
+                                color: cellItem.modelData.agent && cellItem.modelData.agent.state === "waiting_for_user" ? Theme.warn
+                                     : cellItem.modelData.agent && cellItem.modelData.agent.state === "working" ? Theme.pencil : Theme.fixer
+                                SequentialAnimation on opacity {
+                                    running: cellItem.modelData.agent && cellItem.modelData.agent.state === "working"; loops: Animation.Infinite
+                                    NumberAnimation { to: 0.3; duration: 500 } NumberAnimation { to: 1; duration: 500 }
+                                }
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: win.cellW - 40
+                                elide: Text.ElideRight
+                                text: {
+                                    const a = cellItem.modelData.agent; if (!a) return "";
+                                    if (a.state === "waiting_for_user") return "needs you";
+                                    if (a.state === "finished") return "finished";
+                                    if (a.state === "idle") return "idle";
+                                    return a.last_action ? a.last_action : "working";
+                                }
+                                color: Theme.paper
+                                font.family: Theme.sans; font.pixelSize: Theme.fs12
+                            }
+                        }
                         // Temporary slot empty timer
                         Row {
                             anchors.left: parent.left; anchors.bottom: parent.bottom
                             anchors.leftMargin: 6; anchors.bottomMargin: 6
                             spacing: 4
-                            visible: cellItem.modelData.temporary === true && cellItem.modelData.empty_for_ms !== null && cellItem.modelData.empty_for_ms !== undefined
+                            visible: cellItem.modelData.temporary === true && cellItem.modelData.empty_for_ms !== null && cellItem.modelData.empty_for_ms !== undefined && !cellItem.modelData.agent
                             Glyph { text: "󰔟"; size: 12; color: Theme.fixer }
                             Text {
                                 text: "empty " + Math.round((cellItem.modelData.empty_for_ms || 0) / 1000) + " s, gone at 30"
@@ -258,7 +289,7 @@ PanelWindow {
                         spacing: Theme.s8
                         Text {
                             width: win.cellW - (cellItem.modelData.active ? 50 : 0)
-                            text: cellItem.modelData.unnumbered ? ("temporary" + (cellItem.modelData.owner ? ", by " + cellItem.modelData.owner : "")) : cellItem.modelData.slot_display_name
+                            text: cellItem.modelData.agent ? ("agent: " + cellItem.modelData.agent.client) : cellItem.modelData.unnumbered ? ("temporary" + (cellItem.modelData.owner ? ", by " + cellItem.modelData.owner : "")) : cellItem.modelData.slot_display_name
                             elide: Text.ElideRight
                             color: cellItem.isSelected ? Theme.paper : Theme.fixer
                             font.family: Theme.sans; font.pixelSize: Theme.fs13

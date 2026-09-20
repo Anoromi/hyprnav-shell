@@ -132,6 +132,27 @@ hl.window_rule({{
     plugin_so = os.environ.get("HNS_PLUGIN_SO")
     if plugin_so:
         print(hc("plugin", "load", plugin_so).strip())
+    for extra in filter(None, os.environ.get("HNS_EXTRA_PLUGIN_SO", "").split(":")):
+        print(hc("plugin", "load", extra).strip())
+    # Portals inside the lab session: xdg-desktop-portal with the Hyprland
+    # backend, and hyprnav's picker so screen shares never show a dialog.
+    if os.environ.get("HNS_PORTALS", "1") == "1":
+        xdp = os.environ.get("HNS_XDP_DIR", "/nix/store/hwfl4n2p049q0pa2gzsrjfiqlgf6cbny-xdg-desktop-portal-1.22.1")
+        xdph = os.environ.get("HNS_XDPH_DIR", "/nix/store/0w9vhwzwdbs65drq15v826a8bv77qxr2-xdg-desktop-portal-hyprland-1.4.1")
+        picker = os.environ.get("HNS_SHARE_PICKER", str(Path.home() / "code/stolen/hyprland-plugins/scripts/hyprnav-share-picker"))
+        cfg = LAB / "config"
+        (cfg / "xdg-desktop-portal").mkdir(parents=True, exist_ok=True)
+        (cfg / "xdg-desktop-portal/portals.conf").write_text("[preferred]\ndefault=hyprland\n")
+        (cfg / "hypr").mkdir(parents=True, exist_ok=True)
+        (cfg / "hypr/xdph.conf").write_text(f"screencopy {{\n    custom_picker_binary = {picker}\n    allow_token_by_default = 1\n}}\n")
+        penv = dict(env, XDG_CURRENT_DESKTOP="Hyprland", XDG_SESSION_TYPE="wayland",
+                    XDG_DESKTOP_PORTAL_DIR=f"{xdph}/share/xdg-desktop-portal/portals",
+                    PATH=f"{xdph}/bin:" + env["PATH"])
+        launch("xdph", [f"{xdph}/libexec/xdg-desktop-portal-hyprland"], penv, procs)
+        time.sleep(0.5)
+        launch("xdp", [f"{xdp}/libexec/xdg-desktop-portal", "--verbose"], penv, procs)
+        env["XDG_CURRENT_DESKTOP"] = "Hyprland"
+        env["PATH"] = f"{xdph}/bin:" + env["PATH"]
     nav = launch("hyprnav", [hyprnav_bin, "daemon"], env, procs)
     time.sleep(0.8)
     print(json.dumps({"runtime": str(runtime), "instance": env["HYPRLAND_INSTANCE_SIGNATURE"], "pids": procs}, indent=2))

@@ -44,6 +44,10 @@ ShellRoot {
         model: root.screens
         Caption {}
     }
+    Variants {
+        model: root.screens
+        AgentBadges {}
+    }
     IpcHandler {
         target: "caption"
         function display(text: string, ms: int): void { captions.instances[0]?.show(text, ms); }
