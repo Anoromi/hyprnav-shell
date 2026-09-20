@@ -20,7 +20,7 @@ PanelWindow {
     property int selCol: 0
     readonly property var rows: Services.Hyprnav.rows
     readonly property var selectedRow: rows[selRow] ?? null
-    readonly property var selectedCell: selectedRow ? (selectedRow.cells[selCol] ?? null) : null
+    readonly property var selectedCell: selectedRow ? (selectedRow.cells[selCol]?.snapshot ?? null) : null
 
     visible: phase !== "closed"
     anchors { top: true; bottom: true; left: true; right: true }
@@ -65,28 +65,12 @@ PanelWindow {
         if (row.locked) Services.Hyprnav.unlock(); else Services.Hyprnav.lock(row.envId);
     }
     Timer { id: finish; onTriggered: { win.open = false; win.phase = "closed"; } }
-    // Temporary slots change on their own (empty timers, releases). The daemon
-    // pushes a `slots` event for each of those, so the grid follows the event
-    // stream instead of polling.
-    Connections {
-        target: Services.Hyprnav
-        enabled: win.phase === "open"
-        function onSlotsEvent() { Services.Hyprnav.refreshGrid(); }
-        function onAgentsEvent(agents) { Services.Hyprnav.refreshGrid(); }
-    }
-    // Windows opening and closing change the thumbnails and slot subtitles.
-    Connections {
-        target: Hyprland
-        enabled: win.phase === "open"
-        function onRawEvent(ev) {
-            switch (ev.name) {
-            case "openwindow": case "closewindow": case "movewindow": case "movewindowv2":
-            case "workspace": case "workspacev2": case "focusedmon":
-                Services.Hyprnav.refreshGrid();
-                break;
-            }
-        }
-    }
+    // Temporary slots change on their own (empty timers, releases) and windows
+    // open and close under the grid; both reach the service as a `slots` event
+    // or a Hyprland event and it re-reads the snapshot on its own, debounced.
+    // Agent beats deliberately do not refresh anything here: slot membership
+    // cannot change on a beat, and the cells read the agent straight from the
+    // pushed registry, so a working agent never disturbs the thumbnails.
 
     // Geometry
     readonly property int inset: 160
@@ -130,7 +114,7 @@ PanelWindow {
                 if (ev.key >= Qt.Key_1 && ev.key <= Qt.Key_9) {
                     const n = ev.key - Qt.Key_1;
                     const row = win.selectedRow;
-                    if (row) { const idx = row.cells.findIndex(c => c.slot_index === n + 1); if (idx >= 0) { win.selCol = idx; win.activate(); } }
+                    if (row) { const idx = row.cells.findIndex(c => c.snapshot.slot_index === n + 1); if (idx >= 0) { win.selCol = idx; win.activate(); } }
                 } else return;
             }
             ev.accepted = true;
@@ -184,10 +168,15 @@ PanelWindow {
                     id: cellItem
                     required property var modelData
                     required property int index
+                    // The GridCell outlives snapshots; only `snapshot` changes.
+                    readonly property var cell: modelData.snapshot
+                    // The agent comes from the pushed registry, so a beat
+                    // updates this row alone and never the whole grid.
+                    readonly property var agent: Services.Hyprnav.agentFor(cell.physical_workspace_id) ?? cell.agent ?? null
                     readonly property bool isSelected: rowItem.index === win.selRow && index === win.selCol
-                    readonly property bool hasWindows: modelData.window_count > 0
+                    readonly property bool hasWindows: cell.window_count > 0
                     readonly property string launchName: {
-                        if (modelData.subtitle && modelData.subtitle.indexOf("Workspace") !== 0) return modelData.subtitle;
+                        if (cell.subtitle && cell.subtitle.indexOf("Workspace") !== 0) return cell.subtitle;
                         return "";
                     }
                     x: index * (win.cellW + win.gap)
@@ -202,11 +191,11 @@ PanelWindow {
                         width: win.cellW; height: win.cellH
                         radius: Theme.rFrame
                         color: cellItem.hasWindows ? Theme.sheet : Theme.emulsion
-                        border.width: cellItem.modelData.inherited || cellItem.modelData.temporary ? 0 : 1
+                        border.width: cellItem.cell.inherited || cellItem.cell.temporary ? 0 : 1
                         border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, cellItem.hasWindows ? 0.35 : 0.12)
                         Shape {
                             anchors.fill: parent
-                            visible: cellItem.modelData.inherited || cellItem.modelData.temporary
+                            visible: cellItem.cell.inherited || cellItem.cell.temporary
                             ShapePath {
                                 strokeColor: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.4)
                                 strokeWidth: 1
@@ -222,15 +211,15 @@ PanelWindow {
                         }
                         WorkspaceThumb {
                             anchors.fill: parent; anchors.margins: 3
-                            workspaceId: cellItem.modelData.physical_workspace_id
+                            workspaceId: cellItem.cell.physical_workspace_id
                             live: win.visible
-                            emptyText: cellItem.hasWindows ? "" : (cellItem.modelData.subtitle && cellItem.modelData.subtitle.indexOf("Workspace") !== 0 ? "Opens " + cellItem.modelData.subtitle : "Empty frame")
+                            emptyText: cellItem.hasWindows ? "" : (cellItem.cell.subtitle && cellItem.cell.subtitle.indexOf("Workspace") !== 0 ? "Opens " + cellItem.cell.subtitle : "Empty frame")
                         }
                         // Pin: a spawned process tree is stuck to this frame.
                         Glyph {
                             anchors.right: parent.right; anchors.top: parent.top
                             anchors.rightMargin: 8; anchors.topMargin: 6
-                            visible: cellItem.modelData.stuck === true
+                            visible: cellItem.cell.stuck === true
                             text: "󰐃"
                             size: 14
                             color: Theme.pencil
@@ -246,9 +235,9 @@ PanelWindow {
                             Text {
                                 id: num
                                 anchors.centerIn: parent
-                                text: cellItem.modelData.unnumbered ? cellItem.modelData.workspace_name : cellItem.modelData.slot_index
+                                text: cellItem.cell.unnumbered ? cellItem.cell.workspace_name : cellItem.cell.slot_index
                                 color: cellItem.isSelected ? Theme.darkroom : Theme.paper
-                                font.family: cellItem.modelData.unnumbered ? Theme.casual : Theme.mono
+                                font.family: cellItem.cell.unnumbered ? Theme.casual : Theme.mono
                                 font.pixelSize: Theme.fs13; font.weight: Font.Medium
                             }
                         }
@@ -257,14 +246,14 @@ PanelWindow {
                             anchors.left: parent.left; anchors.bottom: parent.bottom
                             anchors.leftMargin: 6; anchors.bottomMargin: 6
                             spacing: 6
-                            visible: cellItem.modelData.agent !== null && cellItem.modelData.agent !== undefined
+                            visible: cellItem.agent !== null && cellItem.agent !== undefined
                             Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
                                 width: 8; height: 8; radius: 4
-                                color: cellItem.modelData.agent && cellItem.modelData.agent.state === "waiting_for_user" ? Theme.warn
-                                     : cellItem.modelData.agent && cellItem.modelData.agent.state === "working" ? Theme.pencil : Theme.fixer
+                                color: cellItem.agent && cellItem.agent.state === "waiting_for_user" ? Theme.warn
+                                     : cellItem.agent && cellItem.agent.state === "working" ? Theme.pencil : Theme.fixer
                                 SequentialAnimation on opacity {
-                                    running: cellItem.modelData.agent && cellItem.modelData.agent.state === "working"; loops: Animation.Infinite
+                                    running: cellItem.agent && cellItem.agent.state === "working"; loops: Animation.Infinite
                                     NumberAnimation { to: 0.3; duration: 500 } NumberAnimation { to: 1; duration: 500 }
                                 }
                             }
@@ -273,7 +262,7 @@ PanelWindow {
                                 width: win.cellW - 40
                                 elide: Text.ElideRight
                                 text: {
-                                    const a = cellItem.modelData.agent; if (!a) return "";
+                                    const a = cellItem.agent; if (!a) return "";
                                     if (a.state === "waiting_for_user") return "needs you";
                                     if (a.state === "finished") return "finished";
                                     if (a.state === "idle") return "idle";
@@ -288,10 +277,10 @@ PanelWindow {
                             anchors.left: parent.left; anchors.bottom: parent.bottom
                             anchors.leftMargin: 6; anchors.bottomMargin: 6
                             spacing: 4
-                            visible: cellItem.modelData.temporary === true && cellItem.modelData.empty_for_ms !== null && cellItem.modelData.empty_for_ms !== undefined && !cellItem.modelData.agent
+                            visible: cellItem.cell.temporary === true && cellItem.cell.empty_for_ms !== null && cellItem.cell.empty_for_ms !== undefined && !cellItem.agent
                             Glyph { text: "󰔟"; size: 12; color: Theme.fixer }
                             Text {
-                                text: "empty " + Math.round((cellItem.modelData.empty_for_ms || 0) / 1000) + " s, gone at 30"
+                                text: "empty " + Math.round((cellItem.cell.empty_for_ms || 0) / 1000) + " s, gone at 30"
                                 color: Theme.fixer
                                 font.family: Theme.sans; font.pixelSize: Theme.fs12
                             }
@@ -307,8 +296,8 @@ PanelWindow {
                         anchors.top: frame.bottom; anchors.topMargin: 7
                         spacing: Theme.s8
                         Text {
-                            width: win.cellW - (cellItem.modelData.active ? 50 : 0)
-                            text: cellItem.modelData.agent ? ("agent: " + cellItem.modelData.agent.client) : cellItem.modelData.unnumbered ? ("temporary" + (cellItem.modelData.owner ? ", by " + cellItem.modelData.owner : "")) : cellItem.modelData.slot_display_name
+                            width: win.cellW - (cellItem.cell.active ? 50 : 0)
+                            text: cellItem.agent ? ("agent: " + cellItem.agent.client) : cellItem.cell.unnumbered ? ("temporary" + (cellItem.cell.owner ? ", by " + cellItem.cell.owner : "")) : cellItem.cell.slot_display_name
                             elide: Text.ElideRight
                             color: cellItem.isSelected ? Theme.paper : Theme.fixer
                             font.family: Theme.sans; font.pixelSize: Theme.fs13
@@ -316,7 +305,7 @@ PanelWindow {
                             Behavior on color { ColorAnimation { duration: Theme.tFast } }
                         }
                         Text {
-                            visible: cellItem.modelData.active
+                            visible: cellItem.cell.active
                             text: "here"
                             color: Theme.pencil
                             font.family: Theme.sans; font.pixelSize: Theme.fs13
@@ -375,7 +364,7 @@ PanelWindow {
             list.push({ id: "temp-run", scope: "roll", title: "New temporary slot and run…", needsText: true, prompt: "Command", defaultText: "" });
             list.push({ id: "env-rename", scope: "roll", title: "Rename environment", needsText: true, prompt: "Title", defaultText: row.title });
             list.push({ id: "lock", scope: "roll", title: row.locked ? "Unlock environment" : "Lock environment" });
-            if (row.cells.every(c => c.window_count === 0)) list.push({ id: "env-delete", scope: "roll", title: "Delete environment" });
+            if (row.cells.every(c => c.snapshot.window_count === 0)) list.push({ id: "env-delete", scope: "roll", title: "Delete environment" });
         }
         list.push({ id: "goto-locked", scope: "everywhere", title: "Go to locked environment" });
         list.push({ id: "refresh", scope: "everywhere", title: "Refresh" });
@@ -435,7 +424,7 @@ PanelWindow {
         case "move-windows": {
             if (!cell || !row) break;
             const q = text.trim().toLowerCase();
-            const target = row.cells.find(c => String(c.slot_index) === q || (c.slot_display_name || "").toLowerCase() === q);
+            const target = row.cells.map(c => c.snapshot).find(c => String(c.slot_index) === q || (c.slot_display_name || "").toLowerCase() === q);
             if (!target) break;
             withWindowsOn(cell.physical_workspace_id, list => { for (const a of list) dispatch("hl.dsp.window.move({ window = \"address:" + a + "\", workspace = \"" + target.physical_workspace_id + " silent\" })"); });
             break;

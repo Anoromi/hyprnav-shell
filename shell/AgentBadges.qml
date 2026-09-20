@@ -35,9 +35,19 @@ PanelWindow {
         return out;
     }
 
+    // Only the set of driven windows matters here, not the beat itself: a
+    // refresh is a `hyprctl clients` round trip that replaces every toplevel's
+    // cached IPC object, so doing it once a second would churn the window
+    // geometry every other view reads.
+    property string drivenAddresses: ""
     Connections {
         target: Services.Hyprnav
-        function onAgentsEvent(agents) { Hyprland.refreshToplevels(); }
+        function onAgentsEvent(agents) {
+            const next = agents.map(a => a.current_target ?? "").sort().join(",");
+            if (next === win.drivenAddresses) return;
+            win.drivenAddresses = next;
+            Hyprland.refreshToplevels();
+        }
     }
     Connections {
         target: Hyprland

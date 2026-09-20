@@ -179,17 +179,88 @@ Singleton {
     readonly property string lockedEnv: status && status.locked_environment_id ? status.locked_environment_id : ""
 
     // Rows derived from the grid snapshot, for the grid overlay and the bar.
-    readonly property var rows: {
-        if (!grid) return [];
+    //
+    // These are long-lived GridRow/GridCell objects rather than plain JSON, and
+    // `rows` is only reassigned when the set of rows or slots actually changes.
+    // A Repeater fed a fresh array resets its whole delegate model, which in the
+    // grid means every cell, thumbnail and screencopy capture is destroyed and
+    // rebuilt; with a live snapshot field such as an agent's `last_action` or a
+    // temporary slot's `empty_for_ms` that happened once a second and made the
+    // thumbnails blink. Updating `snapshot` in place leaves delegates alone.
+    property var rows: []
+    property var _cellsByKey: ({})
+    property var _rowsByIndex: ({})
+    property Component _cellComponent: Component { GridCell {} }
+    property Component _rowComponent: Component { GridRow {} }
+
+    function _cellKey(c) { return c.row_index + "/" + c.slot_index + "/" + c.physical_workspace_id; }
+
+    function _syncRows() {
         const byRow = {};
         const order = [];
-        for (const c of grid.items) {
-            if (!(c.row_index in byRow)) { byRow[c.row_index] = { rowIndex: c.row_index, envId: c.environment_id, title: c.environment_title, displayId: c.environment_display_id, locked: c.environment_locked, cells: [] }; order.push(c.row_index); }
-            byRow[c.row_index].cells.push(c);
+        for (const c of (grid ? grid.items : [])) {
+            if (!(c.row_index in byRow)) { byRow[c.row_index] = []; order.push(c.row_index); }
+            byRow[c.row_index].push(c);
         }
         order.sort((a, b) => a - b);
-        return order.map(r => { byRow[r].cells.sort((a, b) => a.column_index - b.column_index); return byRow[r]; });
+
+        const keptRows = {}, keptCells = {};
+        const nextRows = [];
+        // Rows and cells are tracked apart on purpose: a window opening in one
+        // frame replaces that row's cells, and reassigning `rows` as well would
+        // rebuild every other roll's thumbnails for nothing.
+        let rowSetChanged = order.length !== rows.length;
+
+        for (const idx of order) {
+            const items = byRow[idx].sort((a, b) => a.column_index - b.column_index);
+            const head = items[0];
+            let row = _rowsByIndex[idx];
+            if (!row) { row = _rowComponent.createObject(root); rowSetChanged = true; }
+            keptRows[idx] = row;
+            row.rowIndex = idx;
+            row.envId = head.environment_id;
+            row.title = head.environment_title;
+            row.displayId = head.environment_display_id;
+            row.locked = head.environment_locked;
+
+            const keys = items.map(_cellKey);
+            let sameCells = keys.length === row.cells.length;
+            if (sameCells) for (let i = 0; i < keys.length; i++) if (row.cells[i].key !== keys[i]) { sameCells = false; break; }
+            if (sameCells) {
+                for (let i = 0; i < items.length; i++) { row.cells[i].snapshot = items[i]; keptCells[keys[i]] = row.cells[i]; }
+            } else {
+                const cells = [];
+                for (let i = 0; i < items.length; i++) {
+                    let cell = _cellsByKey[keys[i]];
+                    if (!cell) { cell = _cellComponent.createObject(root, { key: keys[i] }); }
+                    cell.snapshot = items[i];
+                    keptCells[keys[i]] = cell;
+                    cells.push(cell);
+                }
+                row.cells = cells;
+            }
+            nextRows.push(row);
+        }
+
+        for (const k in _cellsByKey) if (!(k in keptCells)) _cellsByKey[k].destroy();
+        for (const i in _rowsByIndex) if (!(i in keptRows)) _rowsByIndex[i].destroy();
+        _cellsByKey = keptCells;
+        _rowsByIndex = keptRows;
+
+        if (!rowSetChanged) for (let i = 0; i < nextRows.length; i++) if (nextRows[i] !== rows[i]) { rowSetChanged = true; break; }
+        if (rowSetChanged) rows = nextRows;
     }
+    onGridChanged: _syncRows()
+
+    // Live agent registry keyed by the workspace each agent works in. Beats
+    // arrive on the event socket already; a cell reads its agent from here
+    // instead of making the grid re-request the whole snapshot every second.
+    readonly property var agentsByWorkspace: {
+        const m = {};
+        for (const a of agents) if (a.workspace_id !== null && a.workspace_id !== undefined) m[a.workspace_id] = a;
+        return m;
+    }
+    function agentFor(workspaceId) { return agentsByWorkspace[workspaceId] ?? null; }
 
     // The cell whose workspace is currently focused, if any.
     readonly property var activeCell: {
@@ -204,7 +275,7 @@ Singleton {
         target: Hyprland
         function onRawEvent(ev) {
             const n = ev.name;
-            if (n === "workspace" || n === "workspacev2" || n === "openwindow" || n === "closewindow" || n === "activewindow" || n === "movewindow" || n === "focusedmon" || n === "createworkspace" || n === "destroyworkspace")
+            if (n === "workspace" || n === "workspacev2" || n === "openwindow" || n === "closewindow" || n === "activewindow" || n === "movewindow" || n === "movewindowv2" || n === "focusedmon" || n === "createworkspace" || n === "destroyworkspace")
                 refreshDebounce.restart();
         }
     }

@@ -40,6 +40,10 @@ Item {
         delegate: Item {
             id: winItem
             required property var modelData
+            // Held rather than bound: Hyprland's toplevel cache hands out a new
+            // IPC object on every refresh, and re-reading `wayland` through it
+            // would restart the capture for nothing.
+            readonly property var wayland: modelData.wayland
             readonly property var o: modelData.lastIpcObject
             readonly property bool placed: !!(o && o.at && o.size)
             x: placed ? root.ox + (o.at[0] - root.bbox.x) * root.fit : 0
@@ -56,7 +60,9 @@ Item {
                     anchors.fill: parent
                     // Only hold a capture while the overlay is shown; a captured
                     // toplevel that closes while bound kills the Wayland connection.
-                    captureSource: root.live ? winItem.modelData.wayland : null
+                    // Rebinding this restarts the capture and blanks the frame,
+                    // so it changes only when the window itself does.
+                    captureSource: root.live ? winItem.wayland : null
                     live: root.live
                     paintCursor: false
                 }
