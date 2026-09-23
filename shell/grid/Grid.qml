@@ -60,7 +60,7 @@ PanelWindow {
         Services.Hyprnav.gotoSlot(cell.environment_id, cell.slot_index);
         finish.interval = Theme.reducedMotion ? 0 : 140; finish.restart();
     }
-    function togglePalette() { if (palette.open) palette.hide(); else palette.show(); }
+    function togglePalette() { if (palette.open) palette.hide(); else showPalette(); }
     function toggleLock() {
         const row = selectedRow; if (!row) return;
         if (row.locked) Services.Hyprnav.unlock(); else Services.Hyprnav.lock(row.envId);
