@@ -87,3 +87,24 @@ scan for `hyprctl` execs:
 | before, one live agent | 0.230 s | 19 |
 | after, no agents | 0.010 s | 0 |
 | after, one live agent | 0.000 s | 0 |
+
+## Wrapped rolls (2026-09-23)
+
+A roll with more frames than the window is wide now wraps. `scripts/lab.py up`,
+`scripts/run.sh start`, a 14-slot `fleet` environment and a 3-slot `shell` one,
+1920x1080: six frames a line, so the big roll takes three lines and the stack
+measures 608 + 240 px and still centres.
+
+| Check | How | Result |
+|---|---|---|
+| Wrap | grid open, screenshot | frames 1-6, 7-12, 13-14 on three lines, same size and gap |
+| Next roll follows | same screenshot | `hyprnav shell` sits below the wrapped roll's real height, not one row down |
+| Right across a line break | wtype Right x6 from frame 1 | ring lands on frame 7, first column of the second line |
+| Down between lines | wtype Down | frame 7 to frame 13, same column |
+| Down out of the roll | wtype Down from the last line | first line of the next roll, nearest column |
+| Up back into a roll | wtype Up | last line of the roll above, same column |
+| End / Home | wtype End, Home | last frame (14, second column of line three) and frame 1 |
+| Enter on a wrapped frame | wtype Return on frame 13 | compositor switches to that workspace, bar shows 13 |
+| Overflow | 16 + 4 + 3 frames, 1088 px of rolls | `rowsTop` clamps to 80 and the last roll runs off the bottom; no scrolling yet |
+
+Recording: `recordings/grid-wrap.mp4` (`scripts/grid-wrap-demo.sh`).

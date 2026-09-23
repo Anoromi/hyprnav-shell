@@ -48,11 +48,29 @@ PanelWindow {
         if (phase !== "open") return;
         phase = "closing"; finish.interval = Theme.tFast; finish.restart();
     }
+    // Left and right walk the roll in reading order, across line breaks; up and
+    // down step between lines, and leave the roll only from its first or last
+    // line, landing on the nearest column of the neighbouring roll.
     function move(dr, dc) {
         if (rows.length === 0) return;
-        let r = Math.max(0, Math.min(rows.length - 1, selRow + dr));
-        let c = Math.max(0, Math.min(rows[r].cells.length - 1, selCol + dc));
-        selRow = r; selCol = c;
+        if (dr !== 0) moveLine(dr); else moveCell(dc);
+    }
+    function moveCell(dc) {
+        const n = rows[selRow]?.cells.length ?? 0;
+        if (n === 0) return;
+        selCol = Math.max(0, Math.min(n - 1, selCol + dc));
+    }
+    function moveLine(dr) {
+        const n = rows[selRow]?.cells.length ?? 0;
+        if (n === 0) return;
+        const col = selCol % cols;
+        const line = Math.floor(selCol / cols) + dr;
+        if (line >= 0 && line < linesIn(n)) { selCol = Math.min(n - 1, line * cols + col); return; }
+        const r = selRow + dr;
+        if (r < 0 || r >= rows.length) return;
+        const m = rows[r].cells.length;
+        const target = dr > 0 ? col : (linesIn(m) - 1) * cols + col;
+        selRow = r; selCol = Math.max(0, Math.min(m - 1, target));
     }
     function activate() {
         const cell = selectedCell; if (!cell || phase !== "open") return;
@@ -66,6 +84,13 @@ PanelWindow {
         if (row.locked) Services.Hyprnav.unlock(); else Services.Hyprnav.lock(row.envId);
     }
     Timer { id: finish; onTriggered: { win.open = false; win.phase = "closed"; } }
+    // A roll can lose frames under the grid; keep the selection on a real cell
+    // so the ring and the line arithmetic stay valid.
+    onRowsChanged: {
+        if (rows.length === 0) return;
+        selRow = Math.min(selRow, rows.length - 1);
+        selCol = Math.max(0, Math.min(selCol, (rows[selRow]?.cells.length ?? 1) - 1));
+    }
     // Temporary slots change on their own (empty timers, releases) and windows
     // open and close under the grid; both reach the service as a `slots` event
     // or a Hyprland event and it re-reads the snapshot on its own, debounced.
@@ -81,10 +106,29 @@ PanelWindow {
     readonly property int titleH: 40
     readonly property int nameH: 30
     readonly property int rowGap: Theme.s32
-    readonly property int rowH: titleH + cellH + nameH + rowGap
-    readonly property int rowsTop: Math.max(80, Math.round((height - rows.length * rowH + rowGap) / 2))
-    function cellX(c) { return inset + c * (cellW + gap); }
-    function cellY(r) { return rowsTop + r * rowH + titleH; }
+    readonly property int lineGap: Theme.s16
+    // A roll wider than the window wraps onto further lines of the same roll,
+    // left to right, top to bottom. Every line holds the same number of frames.
+    readonly property int availableWidth: width - inset * 2
+    readonly property int cols: Math.max(1, Math.floor((availableWidth + gap) / (cellW + gap)))
+    readonly property int lineH: cellH + nameH + lineGap
+    function linesIn(count) { return Math.max(1, Math.ceil(count / cols)); }
+    function rowHeight(count) { const n = linesIn(count); return titleH + n * (cellH + nameH) + (n - 1) * lineGap + rowGap; }
+    // Prefix sum of row heights: rowTops[r] is the offset of row r below
+    // `rowsTop`, rowTops[rows.length] the total height of the stack. It
+    // re-evaluates when the rows or the window width change, and the rows'
+    // `Behavior on y` animates the result.
+    readonly property var rowTops: {
+        const tops = [0];
+        let y = 0;
+        for (let i = 0; i < rows.length; i++) { y += rowHeight(rows[i].cells.length); tops.push(y); }
+        return tops;
+    }
+    readonly property int stackH: rowTops[rows.length] ?? 0
+    // Taller than the screen: pin the stack to the top and let it overflow.
+    readonly property int rowsTop: Math.max(80, Math.round((height - stackH + rowGap) / 2))
+    function cellX(c) { return inset + (c % cols) * (cellW + gap); }
+    function cellY(r, c) { return rowsTop + (rowTops[r] ?? 0) + titleH + Math.floor(c / cols) * lineH; }
 
     Rectangle {
         anchors.fill: parent
@@ -131,9 +175,9 @@ PanelWindow {
             required property var modelData
             required property int index
             x: win.inset
-            y: win.rowsTop + index * win.rowH + (win.phase === "open" || win.phase === "activating" ? 0 : 6)
-            width: win.width - win.inset * 2
-            height: win.rowH
+            y: win.rowsTop + (win.rowTops[index] ?? 0) + (win.phase === "open" || win.phase === "activating" ? 0 : 6)
+            width: win.availableWidth
+            height: win.rowHeight(modelData.cells.length)
             opacity: win.phase === "closed" ? 0 : 1
             Behavior on opacity { NumberAnimation { duration: win.phase === "closing" ? Theme.tFast : Theme.tRise; easing.type: Easing.OutCubic } }
             Behavior on y { NumberAnimation { duration: Theme.tRise; easing.type: Easing.OutCubic } }
@@ -180,8 +224,8 @@ PanelWindow {
                         if (cell.subtitle && cell.subtitle.indexOf("Workspace") !== 0) return cell.subtitle;
                         return "";
                     }
-                    x: index * (win.cellW + win.gap)
-                    y: win.titleH
+                    x: (index % win.cols) * (win.cellW + win.gap)
+                    y: win.titleH + Math.floor(index / win.cols) * win.lineH
                     width: win.cellW
                     height: win.cellH + win.nameH
                     opacity: win.phase === "activating" && !isSelected ? 0.4 : 1
@@ -323,7 +367,7 @@ PanelWindow {
         visible: win.selectedCell !== null && win.phase !== "closed"
         readonly property int pad: 6
         x: win.cellX(win.selCol) - pad
-        y: win.cellY(win.selRow) - pad
+        y: win.cellY(win.selRow, win.selCol) - pad
         width: win.cellW + pad * 2
         height: win.cellH + pad * 2
         radius: Theme.rFrame + pad
