@@ -43,6 +43,7 @@ PanelWindow {
         });
     }
     function toggle() { if (phase === "open") close(); else show(); }
+    function showPalette() { palette.actions = paletteActions(); palette.show(); }
     function close() {
         if (phase !== "open") return;
         phase = "closing"; finish.interval = Theme.tFast; finish.restart();
@@ -97,7 +98,7 @@ PanelWindow {
         anchors.fill: parent
         focus: true
         Keys.onPressed: ev => {
-            if (ev.key === Qt.Key_P && (ev.modifiers & Qt.ControlModifier)) { if (palette.open) palette.hide(); else palette.show(); ev.accepted = true; return; }
+            if (ev.key === Qt.Key_P && (ev.modifiers & Qt.ControlModifier)) { if (palette.open) palette.hide(); else win.showPalette(); ev.accepted = true; return; }
             if (palette.open) return;
             switch (ev.key) {
             case Qt.Key_Right: case Qt.Key_L: win.move(0, 1); break;
@@ -342,7 +343,7 @@ PanelWindow {
     CommandPalette {
         id: palette
         anchors.centerIn: parent
-        actions: win.paletteActions()
+        actions: []
         onRun: (action, text) => win.runAction(action, text)
         onOpenChanged: if (!open) keys.forceActiveFocus()
     }
