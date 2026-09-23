@@ -39,7 +39,11 @@ PanelWindow {
             const it = res.items[res.initial_index];
             if (it) { r = rs.findIndex(x => x.rowIndex === it.row_index); c = Math.max(0, it.column_index); if (r < 0) r = 0; }
             selRow = r; selCol = Math.min(c, (rs[r]?.cells.length ?? 1) - 1);
+            // The layer surface has no size until it is shown, so the opening
+            // scroll waits for the first real geometry.
+            pendingScroll = true;
             phase = "open"; open = true; keys.forceActiveFocus();
+            settleScroll();
         });
     }
     function toggle() { if (phase === "open") close(); else show(); }
@@ -90,6 +94,11 @@ PanelWindow {
         if (rows.length === 0) return;
         selRow = Math.min(selRow, rows.length - 1);
         selCol = Math.max(0, Math.min(selCol, (rows[selRow]?.cells.length ?? 1) - 1));
+        // Rolls that gained or lost a line move everything below them.
+        settleScroll();
+        if (!laid) return;
+        scrollY = clampScroll(scrollY);
+        ensureVisible();
     }
     // Temporary slots change on their own (empty timers, releases) and windows
     // open and close under the grid; both reach the service as a `slots` event
@@ -125,10 +134,87 @@ PanelWindow {
         return tops;
     }
     readonly property int stackH: rowTops[rows.length] ?? 0
-    // Taller than the screen: pin the stack to the top and let it overflow.
-    readonly property int rowsTop: Math.max(80, Math.round((height - stackH + rowGap) / 2))
+    // Every row carries a trailing `rowGap`; the ink of the stack stops one gap
+    // short of `stackH`.
+    readonly property int contentH: Math.max(0, stackH - rowGap)
+    // The viewport: the window minus the top margin and the room the hint line
+    // needs at the bottom.
+    readonly property int topInset: 80
+    readonly property int bottomInset: 80
+    readonly property int viewportH: Math.max(0, height - topInset - bottomInset)
+    // Taller than the viewport: pin the stack to the top and scroll it.
+    readonly property int rowsTop: Math.max(topInset, Math.round((height - stackH + rowGap) / 2))
+    readonly property int maxScroll: Math.max(0, contentH - viewportH)
+    // The soft edges are 48 px deep, so a selection parked one `rowGap` from
+    // the edge would sit under one. Keep the ring clear of both.
+    readonly property int fadeH: 48
+    readonly property int scrollMargin: Math.max(rowGap, fadeH)
+    property real scrollY: 0
+    // Animate the slide, except on open, where the grid must appear already
+    // scrolled rather than fly to the right place.
+    property bool scrollAnimated: true
+    readonly property bool canScrollUp: maxScroll > 0 && scrollY > 0.5
+    readonly property bool canScrollDown: maxScroll > 0 && scrollY < maxScroll - 0.5
+    Behavior on scrollY {
+        enabled: !Theme.reducedMotion && win.scrollAnimated
+        NumberAnimation { duration: Theme.tRise; easing.type: Easing.OutCubic }
+    }
+    // A scroll slides the cells under a resting pointer; let the hover-select
+    // settle before it takes the selection away from the keys.
+    onScrollYChanged: { scrolling = true; hoverGuard.restart(); indicatorIdle.restart(); }
+    property bool scrolling: false
+    Timer { id: hoverGuard; interval: 300; onTriggered: win.scrolling = false }
+    Timer { id: indicatorIdle; interval: 800; onTriggered: win.indicatorShown = false }
+    property bool indicatorShown: false
+    onScrollingChanged: if (scrolling) indicatorShown = true
+
+    // Nothing below is meaningful before the window has a size.
+    readonly property bool laid: width > 0 && viewportH > 0
+    property bool pendingScroll: false
+    // Open already scrolled to the selection, measured from the top, so a stack
+    // that fits still shows its first roll at the top as it did before.
+    function settleScroll() {
+        if (!pendingScroll || !laid || rows.length === 0) return;
+        pendingScroll = false;
+        scrollAnimated = false;
+        scrollY = 0;
+        ensureVisible();
+        Qt.callLater(() => win.scrollAnimated = true);
+    }
+    onLaidChanged: settleScroll()
+    function clampScroll(v) { return Math.max(0, Math.min(maxScroll, v)); }
+    function scrollBy(dy) { scrollY = clampScroll(scrollY + dy); }
+    // Bring the selected cell's line into the viewport with the smallest move.
+    // The first line of a roll carries its title, every line its name labels,
+    // and the soft edges must not fall over either.
+    function ensureVisible() {
+        if (!laid) return;
+        if (maxScroll <= 0) { scrollY = 0; return; }
+        const r = selRow, c = selCol;
+        if (!rows[r]) return;
+        const line = Math.floor(c / cols);
+        const rowTop = rowsTop + (rowTops[r] ?? 0);
+        const top = line === 0 ? rowTop : rowTop + titleH + line * lineH;
+        const bottom = rowTop + titleH + line * lineH + cellH + nameH;
+        const vTop = scrollY + topInset;
+        const vBottom = vTop + viewportH;
+        if (top - scrollMargin < vTop) scrollY = clampScroll(top - scrollMargin - topInset);
+        else if (bottom + scrollMargin > vBottom) scrollY = clampScroll(bottom + scrollMargin - topInset - viewportH);
+    }
+    onSelRowChanged: ensureVisible()
+    onSelColChanged: ensureVisible()
+    // Rows far outside the viewport keep their delegates but stop painting, so
+    // ScreencopyView does not capture windows nobody can see.
+    function rowVisible(i) {
+        if (!laid || maxScroll <= 0) return true;
+        const top = rowsTop + (rowTops[i] ?? 0);
+        const bottom = top + rowHeight(rows[i]?.cells.length ?? 0);
+        return bottom > scrollY + topInset - lineH && top < scrollY + topInset + viewportH + lineH;
+    }
     function cellX(c) { return inset + (c % cols) * (cellW + gap); }
-    function cellY(r, c) { return rowsTop + (rowTops[r] ?? 0) + titleH + Math.floor(c / cols) * lineH; }
+    // Where the cell sits in the stack, and where it sits on the screen.
+    function cellTop(r, c) { return rowsTop + (rowTops[r] ?? 0) + titleH + Math.floor(c / cols) * lineH; }
+    function cellY(r, c) { return cellTop(r, c) - scrollY; }
 
     Rectangle {
         anchors.fill: parent
@@ -165,222 +251,285 @@ PanelWindow {
             ev.accepted = true;
         }
         MouseArea { anchors.fill: parent; onClicked: win.close() }
-    }
-
-    // Rows
-    Repeater {
-        model: win.rows
-        delegate: Item {
-            id: rowItem
-            required property var modelData
-            required property int index
-            x: win.inset
-            y: win.rowsTop + (win.rowTops[index] ?? 0) + (win.phase === "open" || win.phase === "activating" ? 0 : 6)
-            width: win.availableWidth
-            height: win.rowHeight(modelData.cells.length)
-            opacity: win.phase === "closed" ? 0 : 1
-            Behavior on opacity { NumberAnimation { duration: win.phase === "closing" ? Theme.tFast : Theme.tRise; easing.type: Easing.OutCubic } }
-            Behavior on y { NumberAnimation { duration: Theme.tRise; easing.type: Easing.OutCubic } }
-
-            Row {
-                spacing: Theme.s12
-                height: win.titleH
-                Text {
-                    text: rowItem.modelData.title
-                    color: rowItem.index === win.selRow ? Theme.paper : Theme.fixer
-                    font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
-                    Behavior on color { ColorAnimation { duration: Theme.tFast } }
-                }
-                Text {
-                    visible: rowItem.modelData.locked
-                    anchors.baseline: parent.children[0].baseline
-                    text: "locked"
-                    color: Theme.pencil
-                    font.family: Theme.sans; font.pixelSize: Theme.fs13
-                }
-                Text {
-                    visible: rowItem.modelData.displayId.indexOf(".") >= 0
-                    anchors.baseline: parent.children[0].baseline
-                    text: "inside " + rowItem.modelData.displayId.split(".").slice(0, -1).join(".")
-                    color: Theme.fixer
-                    font.family: Theme.sans; font.pixelSize: Theme.fs13
-                }
-            }
-
-            Repeater {
-                model: rowItem.modelData.cells
-                delegate: Item {
-                    id: cellItem
-                    required property var modelData
-                    required property int index
-                    // The GridCell outlives snapshots; only `snapshot` changes.
-                    readonly property var cell: modelData.snapshot
-                    // The agent comes from the pushed registry, so a beat
-                    // updates this row alone and never the whole grid.
-                    readonly property var agent: Services.Hyprnav.agentFor(cell.physical_workspace_id) ?? cell.agent ?? null
-                    readonly property bool isSelected: rowItem.index === win.selRow && index === win.selCol
-                    readonly property bool hasWindows: cell.window_count > 0
-                    readonly property string launchName: {
-                        if (cell.subtitle && cell.subtitle.indexOf("Workspace") !== 0) return cell.subtitle;
-                        return "";
-                    }
-                    x: (index % win.cols) * (win.cellW + win.gap)
-                    y: win.titleH + Math.floor(index / win.cols) * win.lineH
-                    width: win.cellW
-                    height: win.cellH + win.nameH
-                    opacity: win.phase === "activating" && !isSelected ? 0.4 : 1
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
-
-                    Rectangle {
-                        id: frame
-                        width: win.cellW; height: win.cellH
-                        radius: Theme.rFrame
-                        color: cellItem.hasWindows ? Theme.sheet : Theme.emulsion
-                        border.width: cellItem.cell.inherited || cellItem.cell.temporary ? 0 : 1
-                        border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, cellItem.hasWindows ? 0.35 : 0.12)
-                        Shape {
-                            anchors.fill: parent
-                        visible: !!(cellItem.cell.inherited || cellItem.cell.temporary)
-                            ShapePath {
-                                strokeColor: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.4)
-                                strokeWidth: 1
-                                fillColor: "transparent"
-                                strokeStyle: ShapePath.DashLine
-                                dashPattern: [4, 4]
-                                startX: 0.5; startY: 0.5
-                                PathLine { x: win.cellW - 0.5; y: 0.5 }
-                                PathLine { x: win.cellW - 0.5; y: win.cellH - 0.5 }
-                                PathLine { x: 0.5; y: win.cellH - 0.5 }
-                                PathLine { x: 0.5; y: 0.5 }
-                            }
-                        }
-                        WorkspaceThumb {
-                            anchors.fill: parent; anchors.margins: 3
-                            workspaceId: cellItem.cell.physical_workspace_id
-                            live: win.visible
-                            emptyText: cellItem.hasWindows ? "" : (cellItem.cell.subtitle && cellItem.cell.subtitle.indexOf("Workspace") !== 0 ? "Opens " + cellItem.cell.subtitle : "Empty frame")
-                        }
-                        // Pin: a spawned process tree is stuck to this frame.
-                        Glyph {
-                            anchors.right: parent.right; anchors.top: parent.top
-                            anchors.rightMargin: 8; anchors.topMargin: 6
-                            visible: cellItem.cell.stuck === true
-                            text: "󰐃"
-                            size: 14
-                            color: Theme.pencil
-                        }
-                        // Frame number, film-edge style. Temporary slots have no
-                        // number: they carry their name in Casual instead.
-                        Rectangle {
-                            x: 6; y: 6
-                            width: num.implicitWidth + 10; height: 20
-                            radius: 2
-                            color: cellItem.isSelected ? Theme.pencil : Theme.darkroom
-                            Behavior on color { ColorAnimation { duration: Theme.tFast } }
-                            Text {
-                                id: num
-                                anchors.centerIn: parent
-                                text: cellItem.cell.unnumbered ? cellItem.cell.workspace_name : cellItem.cell.slot_index
-                                color: cellItem.isSelected ? Theme.darkroom : Theme.paper
-                                font.family: cellItem.cell.unnumbered ? Theme.casual : Theme.mono
-                                font.pixelSize: Theme.fs13; font.weight: Font.Medium
-                            }
-                        }
-                        // Agent status: who is working in this frame and what it did last.
-                        Row {
-                            anchors.left: parent.left; anchors.bottom: parent.bottom
-                            anchors.leftMargin: 6; anchors.bottomMargin: 6
-                            spacing: 6
-                            visible: cellItem.agent !== null && cellItem.agent !== undefined
-                            Rectangle {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 8; height: 8; radius: 4
-                                color: cellItem.agent && cellItem.agent.state === "waiting_for_user" ? Theme.warn
-                                     : cellItem.agent && cellItem.agent.state === "working" ? Theme.pencil : Theme.fixer
-                                SequentialAnimation on opacity {
-                                    running: cellItem.agent && cellItem.agent.state === "working"; loops: Animation.Infinite
-                                    NumberAnimation { to: 0.3; duration: 500 } NumberAnimation { to: 1; duration: 500 }
-                                }
-                            }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: win.cellW - 40
-                                elide: Text.ElideRight
-                                text: {
-                                    const a = cellItem.agent; if (!a) return "";
-                                    if (a.state === "waiting_for_user") return "needs you";
-                                    if (a.state === "finished") return "finished";
-                                    if (a.state === "idle") return "idle";
-                                    return a.last_action ? a.last_action : "working";
-                                }
-                                color: Theme.paper
-                                font.family: Theme.sans; font.pixelSize: Theme.fs12
-                            }
-                        }
-                        // Temporary slot empty timer
-                        Row {
-                            anchors.left: parent.left; anchors.bottom: parent.bottom
-                            anchors.leftMargin: 6; anchors.bottomMargin: 6
-                            spacing: 4
-                            visible: cellItem.cell.temporary === true && cellItem.cell.empty_for_ms !== null && cellItem.cell.empty_for_ms !== undefined && !cellItem.agent
-                            Glyph { text: "󰔟"; size: 12; color: Theme.fixer }
-                            Text {
-                                text: "empty " + Math.round((cellItem.cell.empty_for_ms || 0) / 1000) + " s, gone at 30"
-                                color: Theme.fixer
-                                font.family: Theme.sans; font.pixelSize: Theme.fs12
-                            }
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onEntered: { win.selRow = rowItem.index; win.selCol = cellItem.index; }
-                            onClicked: win.activate()
-                        }
-                    }
-                    Row {
-                        anchors.top: frame.bottom; anchors.topMargin: 7
-                        spacing: Theme.s8
-                        Text {
-                            width: win.cellW - (cellItem.cell.active ? 50 : 0)
-                            text: cellItem.agent ? ("agent: " + cellItem.agent.client) : cellItem.cell.unnumbered ? ("temporary" + (cellItem.cell.owner ? ", by " + cellItem.cell.owner : "")) : cellItem.cell.slot_display_name
-                            elide: Text.ElideRight
-                            color: cellItem.isSelected ? Theme.paper : Theme.fixer
-                            font.family: Theme.sans; font.pixelSize: Theme.fs13
-                            font.weight: cellItem.isSelected ? Font.Medium : Font.Normal
-                            Behavior on color { ColorAnimation { duration: Theme.tFast } }
-                        }
-                        Text {
-                            visible: cellItem.cell.active
-                            text: "here"
-                            color: Theme.pencil
-                            font.family: Theme.sans; font.pixelSize: Theme.fs13
-                        }
-                    }
-                }
+        // Wheel and touchpad scroll the stack and never move the selection.
+        WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: ev => {
+                const px = ev.pixelDelta.y !== 0 ? ev.pixelDelta.y : ev.angleDelta.y / 120 * 72;
+                win.scrollBy(-px);
             }
         }
     }
 
-    // The ring
-    Rectangle {
-        id: ring
-        visible: win.selectedCell !== null && win.phase !== "closed"
-        readonly property int pad: 6
-        x: win.cellX(win.selCol) - pad
-        y: win.cellY(win.selRow, win.selCol) - pad
-        width: win.cellW + pad * 2
-        height: win.cellH + pad * 2
-        radius: Theme.rFrame + pad
-        color: "transparent"
-        border.color: Theme.pencil
-        border.width: win.phase === "activating" ? Theme.ringWidth + 2 : Theme.ringWidth
-        scale: win.phase === "open" || win.phase === "activating" ? 1 : 0.92
-        opacity: win.phase === "open" || win.phase === "activating" ? 1 : 0
-        Behavior on x { enabled: !Theme.reducedMotion; SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.2 } }
-        Behavior on y { enabled: !Theme.reducedMotion; SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.2 } }
-        Behavior on border.width { NumberAnimation { duration: 120 } }
-        Behavior on scale { NumberAnimation { duration: Theme.tRise; easing.type: Easing.OutBack } }
-        Behavior on opacity { NumberAnimation { duration: Theme.tFast } }
+    // The viewport: the stack scrolls inside it, the ring travels with it.
+    Item {
+        id: viewport
+        x: 0; y: win.topInset
+        width: win.width; height: win.viewportH
+        clip: true
+
+        Item {
+            id: scroller
+            // Children keep stack coordinates; only this offset moves.
+            x: 0; y: -win.topInset - win.scrollY
+            width: parent.width
+
+            // Rows
+            Repeater {
+                model: win.rows
+                delegate: Item {
+                    id: rowItem
+                    required property var modelData
+                    required property int index
+                    visible: win.rowVisible(index)
+                    x: win.inset
+                    y: win.rowsTop + (win.rowTops[index] ?? 0) + (win.phase === "open" || win.phase === "activating" ? 0 : 6)
+                    width: win.availableWidth
+                    height: win.rowHeight(modelData.cells.length)
+                    opacity: win.phase === "closed" ? 0 : 1
+                    Behavior on opacity { NumberAnimation { duration: win.phase === "closing" ? Theme.tFast : Theme.tRise; easing.type: Easing.OutCubic } }
+                    Behavior on y { NumberAnimation { duration: Theme.tRise; easing.type: Easing.OutCubic } }
+
+                    Row {
+                        spacing: Theme.s12
+                        height: win.titleH
+                        Text {
+                            text: rowItem.modelData.title
+                            color: rowItem.index === win.selRow ? Theme.paper : Theme.fixer
+                            font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
+                            Behavior on color { ColorAnimation { duration: Theme.tFast } }
+                        }
+                        Text {
+                            visible: rowItem.modelData.locked
+                            anchors.baseline: parent.children[0].baseline
+                            text: "locked"
+                            color: Theme.pencil
+                            font.family: Theme.sans; font.pixelSize: Theme.fs13
+                        }
+                        Text {
+                            visible: rowItem.modelData.displayId.indexOf(".") >= 0
+                            anchors.baseline: parent.children[0].baseline
+                            text: "inside " + rowItem.modelData.displayId.split(".").slice(0, -1).join(".")
+                            color: Theme.fixer
+                            font.family: Theme.sans; font.pixelSize: Theme.fs13
+                        }
+                    }
+
+                    Repeater {
+                        model: rowItem.modelData.cells
+                        delegate: Item {
+                            id: cellItem
+                            required property var modelData
+                            required property int index
+                            // The GridCell outlives snapshots; only `snapshot` changes.
+                            readonly property var cell: modelData.snapshot
+                            // The agent comes from the pushed registry, so a beat
+                            // updates this row alone and never the whole grid.
+                            readonly property var agent: Services.Hyprnav.agentFor(cell.physical_workspace_id) ?? cell.agent ?? null
+                            readonly property bool isSelected: rowItem.index === win.selRow && index === win.selCol
+                            readonly property bool hasWindows: cell.window_count > 0
+                            readonly property string launchName: {
+                                if (cell.subtitle && cell.subtitle.indexOf("Workspace") !== 0) return cell.subtitle;
+                                return "";
+                            }
+                            x: (index % win.cols) * (win.cellW + win.gap)
+                            y: win.titleH + Math.floor(index / win.cols) * win.lineH
+                            width: win.cellW
+                            height: win.cellH + win.nameH
+                            opacity: win.phase === "activating" && !isSelected ? 0.4 : 1
+                            Behavior on opacity { NumberAnimation { duration: 120 } }
+
+                            Rectangle {
+                                id: frame
+                                width: win.cellW; height: win.cellH
+                                radius: Theme.rFrame
+                                color: cellItem.hasWindows ? Theme.sheet : Theme.emulsion
+                                border.width: cellItem.cell.inherited || cellItem.cell.temporary ? 0 : 1
+                                border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, cellItem.hasWindows ? 0.35 : 0.12)
+                                Shape {
+                                    anchors.fill: parent
+                                visible: !!(cellItem.cell.inherited || cellItem.cell.temporary)
+                                    ShapePath {
+                                        strokeColor: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.4)
+                                        strokeWidth: 1
+                                        fillColor: "transparent"
+                                        strokeStyle: ShapePath.DashLine
+                                        dashPattern: [4, 4]
+                                        startX: 0.5; startY: 0.5
+                                        PathLine { x: win.cellW - 0.5; y: 0.5 }
+                                        PathLine { x: win.cellW - 0.5; y: win.cellH - 0.5 }
+                                        PathLine { x: 0.5; y: win.cellH - 0.5 }
+                                        PathLine { x: 0.5; y: 0.5 }
+                                    }
+                                }
+                                WorkspaceThumb {
+                                    anchors.fill: parent; anchors.margins: 3
+                                    workspaceId: cellItem.cell.physical_workspace_id
+                                    live: win.visible
+                                    emptyText: cellItem.hasWindows ? "" : (cellItem.cell.subtitle && cellItem.cell.subtitle.indexOf("Workspace") !== 0 ? "Opens " + cellItem.cell.subtitle : "Empty frame")
+                                }
+                                // Pin: a spawned process tree is stuck to this frame.
+                                Glyph {
+                                    anchors.right: parent.right; anchors.top: parent.top
+                                    anchors.rightMargin: 8; anchors.topMargin: 6
+                                    visible: cellItem.cell.stuck === true
+                                    text: "󰐃"
+                                    size: 14
+                                    color: Theme.pencil
+                                }
+                                // Frame number, film-edge style. Temporary slots have no
+                                // number: they carry their name in Casual instead.
+                                Rectangle {
+                                    x: 6; y: 6
+                                    width: num.implicitWidth + 10; height: 20
+                                    radius: 2
+                                    color: cellItem.isSelected ? Theme.pencil : Theme.darkroom
+                                    Behavior on color { ColorAnimation { duration: Theme.tFast } }
+                                    Text {
+                                        id: num
+                                        anchors.centerIn: parent
+                                        text: cellItem.cell.unnumbered ? cellItem.cell.workspace_name : cellItem.cell.slot_index
+                                        color: cellItem.isSelected ? Theme.darkroom : Theme.paper
+                                        font.family: cellItem.cell.unnumbered ? Theme.casual : Theme.mono
+                                        font.pixelSize: Theme.fs13; font.weight: Font.Medium
+                                    }
+                                }
+                                // Agent status: who is working in this frame and what it did last.
+                                Row {
+                                    anchors.left: parent.left; anchors.bottom: parent.bottom
+                                    anchors.leftMargin: 6; anchors.bottomMargin: 6
+                                    spacing: 6
+                                    visible: cellItem.agent !== null && cellItem.agent !== undefined
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 8; height: 8; radius: 4
+                                        color: cellItem.agent && cellItem.agent.state === "waiting_for_user" ? Theme.warn
+                                             : cellItem.agent && cellItem.agent.state === "working" ? Theme.pencil : Theme.fixer
+                                        SequentialAnimation on opacity {
+                                            running: cellItem.agent && cellItem.agent.state === "working"; loops: Animation.Infinite
+                                            NumberAnimation { to: 0.3; duration: 500 } NumberAnimation { to: 1; duration: 500 }
+                                        }
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: win.cellW - 40
+                                        elide: Text.ElideRight
+                                        text: {
+                                            const a = cellItem.agent; if (!a) return "";
+                                            if (a.state === "waiting_for_user") return "needs you";
+                                            if (a.state === "finished") return "finished";
+                                            if (a.state === "idle") return "idle";
+                                            return a.last_action ? a.last_action : "working";
+                                        }
+                                        color: Theme.paper
+                                        font.family: Theme.sans; font.pixelSize: Theme.fs12
+                                    }
+                                }
+                                // Temporary slot empty timer
+                                Row {
+                                    anchors.left: parent.left; anchors.bottom: parent.bottom
+                                    anchors.leftMargin: 6; anchors.bottomMargin: 6
+                                    spacing: 4
+                                    visible: cellItem.cell.temporary === true && cellItem.cell.empty_for_ms !== null && cellItem.cell.empty_for_ms !== undefined && !cellItem.agent
+                                    Glyph { text: "󰔟"; size: 12; color: Theme.fixer }
+                                    Text {
+                                        text: "empty " + Math.round((cellItem.cell.empty_for_ms || 0) / 1000) + " s, gone at 30"
+                                        color: Theme.fixer
+                                        font.family: Theme.sans; font.pixelSize: Theme.fs12
+                                    }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    // A scroll drags cells under a resting pointer; do
+                                    // not let that steal the selection from the keys.
+                                    onEntered: { if (win.scrolling) return; win.selRow = rowItem.index; win.selCol = cellItem.index; }
+                                    onClicked: win.activate()
+                                }
+                            }
+                            Row {
+                                anchors.top: frame.bottom; anchors.topMargin: 7
+                                spacing: Theme.s8
+                                Text {
+                                    width: win.cellW - (cellItem.cell.active ? 50 : 0)
+                                    text: cellItem.agent ? ("agent: " + cellItem.agent.client) : cellItem.cell.unnumbered ? ("temporary" + (cellItem.cell.owner ? ", by " + cellItem.cell.owner : "")) : cellItem.cell.slot_display_name
+                                    elide: Text.ElideRight
+                                    color: cellItem.isSelected ? Theme.paper : Theme.fixer
+                                    font.family: Theme.sans; font.pixelSize: Theme.fs13
+                                    font.weight: cellItem.isSelected ? Font.Medium : Font.Normal
+                                    Behavior on color { ColorAnimation { duration: Theme.tFast } }
+                                }
+                                Text {
+                                    visible: cellItem.cell.active
+                                    text: "here"
+                                    color: Theme.pencil
+                                    font.family: Theme.sans; font.pixelSize: Theme.fs13
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // The ring. It lives in the stack, so a scroll carries it along in one
+            // piece and only a selection change makes it spring.
+            Rectangle {
+                id: ring
+                visible: win.selectedCell !== null && win.phase !== "closed"
+                readonly property int pad: 6
+                x: win.cellX(win.selCol) - pad
+                y: win.cellTop(win.selRow, win.selCol) - pad
+                width: win.cellW + pad * 2
+                height: win.cellH + pad * 2
+                radius: Theme.rFrame + pad
+                color: "transparent"
+                border.color: Theme.pencil
+                border.width: win.phase === "activating" ? Theme.ringWidth + 2 : Theme.ringWidth
+                scale: win.phase === "open" || win.phase === "activating" ? 1 : 0.92
+                opacity: win.phase === "open" || win.phase === "activating" ? 1 : 0
+                Behavior on x { enabled: !Theme.reducedMotion; SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.2 } }
+                Behavior on y { enabled: !Theme.reducedMotion; SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.2 } }
+                Behavior on border.width { NumberAnimation { duration: 120 } }
+                Behavior on scale { NumberAnimation { duration: Theme.tRise; easing.type: Easing.OutBack } }
+                Behavior on opacity { NumberAnimation { duration: Theme.tFast } }
+            }
+        }   // scroller
+
+        // Soft edges, only where the stack continues out of sight.
+        Rectangle {
+            width: parent.width; height: win.fadeH
+            anchors.top: parent.top
+            gradient: Gradient {
+                GradientStop { position: 0; color: Theme.darkroom }
+                GradientStop { position: 1; color: Qt.rgba(Theme.darkroom.r, Theme.darkroom.g, Theme.darkroom.b, 0) }
+            }
+            opacity: win.canScrollUp ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.tScrim } }
+        }
+        Rectangle {
+            width: parent.width; height: win.fadeH
+            anchors.bottom: parent.bottom
+            gradient: Gradient {
+                GradientStop { position: 0; color: Qt.rgba(Theme.darkroom.r, Theme.darkroom.g, Theme.darkroom.b, 0) }
+                GradientStop { position: 1; color: Theme.darkroom }
+            }
+            opacity: win.canScrollDown ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.tScrim } }
+        }
+
+        // Where we are in the stack: a hair on the right edge, gone once the
+        // grid has been still for a moment. No scrollbar.
+        Rectangle {
+            visible: win.maxScroll > 0 && win.phase !== "closed"
+            x: parent.width - width
+            width: 3
+            radius: 1.5
+            height: Math.max(40, viewport.height * viewport.height / Math.max(1, win.contentH))
+            y: win.maxScroll <= 0 ? 0 : (viewport.height - height) * (win.scrollY / win.maxScroll)
+            color: Theme.fixer
+            opacity: win.indicatorShown ? 0.9 : 0
+            Behavior on opacity { NumberAnimation { duration: Theme.tScrim } }
+        }
     }
 
     // Command palette

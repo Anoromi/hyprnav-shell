@@ -1,4 +1,5 @@
-# Tools for the disposable lab compositor: a Wayland virtual seat client, Cage
+# Tools for the disposable lab compositor: a Wayland virtual seat client, a
+# pointer/wheel injector, Cage
 # with xdg-shell v6 (needed by Aquamarine for nested Hyprland), wtype for key
 # injection and wf-recorder for capture. Build with `nix-build lab-tools -o lab-tools/result`.
 { pkgs ? import <nixpkgs> { } }:
@@ -13,6 +14,7 @@ let
     wayland-scanner private-code ${./protocols/wlr-virtual-pointer-unstable-v1.xml} pointer.c
     mkdir -p $out/bin
     cc -I. ${./seat.c} keyboard.c pointer.c $(pkg-config --cflags --libs wayland-client xkbcommon) -o $out/bin/hns-lab-seat
+    cc -I. ${./scroll.c} pointer.c $(pkg-config --cflags --libs wayland-client) -o $out/bin/hns-lab-scroll
   '';
   cage = pkgs.cage.overrideAttrs (old: {
     postPatch = (old.postPatch or "") + ''

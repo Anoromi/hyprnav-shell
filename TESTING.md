@@ -127,3 +127,36 @@ measures 608 + 240 px and still centres.
 | Overflow | 16 + 4 + 3 frames, 1088 px of rolls | `rowsTop` clamps to 80 and the last roll runs off the bottom; no scrolling yet |
 
 Recording: `recordings/grid-wrap.mp4` (`scripts/grid-wrap-demo.sh`).
+
+## A grid that scrolls (2026-09-23)
+
+The stack of rolls now scrolls inside a viewport of `height − 80 − 80` px
+(920 px at 1080). `scripts/lab.py up`, `scripts/run.sh start`, five
+environments — a 32-frame `fleet`, then `shell`, `docs`, `lab` and `notes` —
+for 2088 px of rolls against a 920 px viewport, with fifteen live windows
+spread through them. Wheel input comes from `lab-tools`' new `hns-lab-scroll`,
+a wlr-virtual-pointer client that moves the pointer and sends wheel or
+touchpad axis events.
+
+| Check | How | Result |
+|---|---|---|
+| Opens scrolled | active workspace on frame 32, sixth line of the roll; `ipc call grid open` | opens at `scrollY` 240 with the ring 698..847 px down the viewport |
+| Ring stays in view | Home, then nine Down presses to the end of the stack, then nine Up presses, screenshot each step | the ring is inside the viewport in all nineteen frames; once it reaches an edge it stays put and the rolls slide under it |
+| Stack slides | same walk | `scrollY` moves the minimum needed, animated over `Theme.tRise` |
+| Wheel | `hns-lab-scroll` with the pointer parked off the frames | the stack moves, the ring travels with it, the selection does not change |
+| Fades | screenshots at the top, middle and end of the stack | the top fade appears only above `scrollY` 0, the bottom only below the maximum |
+| Indicator | screenshot 0.12 s after a wheel click and again 2 s later | a 3 px hair on the right edge, 405 px long at the right offset, gone after the 800 ms idle |
+| Enter on a scrolled cell | Return on `hyprnav shell` frame 2 near the bottom of a scrolled viewport | compositor switches to workspace 6 |
+| Stack that fits | two rolls, 480 px | centred exactly as before, no fades, no indicator |
+| No thumbnail blink | 195 frames at 60.3 fps over 3.2 s of continuous wheel scrolling, `signalstats` per frame plus `blackdetect` | no black frame and no single-frame luminance outlier; the montage of 24 consecutive frames shows every thumbnail filled |
+| Idle cost | `strace -e connect,execve` over a 2.4 s scroll window | 0 connections to `hyprnav.sock`, 0 `execve` |
+
+Two things did not match the plan. `ensureVisible` leaves the fade depth
+(48 px) of margin rather than one `rowGap` (32 px): at 32 px the ring's top
+edge sat inside the top fade and was visibly dimmed. And the first check could
+not be staged as written — the daemon sorts the environment holding the active
+workspace to row 0 regardless of recency or hierarchy, so the current row is
+never the last one; the equivalent guarantee, that the grid opens already
+scrolled to the current frame, was checked instead.
+
+Recording: `recordings/grid-scroll.mp4` (`scripts/grid-scroll-demo.sh`), 38 s.

@@ -19,7 +19,12 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
   A roll wider than the window wraps onto further lines of the same roll;
   left and right walk it in reading order across a line break, up and down
   move between lines and leave the roll only from its first or last line,
-  Home and End are the roll's first and last frame. A temporary slot sits at
+  Home and End are the roll's first and last frame. A stack of rolls taller
+  than the window scrolls: it opens already scrolled to the current frame,
+  every selection change brings the selected line back into view with the
+  smallest move, and the wheel scrolls without touching the selection. Soft
+  edges mark a side that still has content behind it and a hair on the right
+  shows the position. A stack that fits is centred as before. A temporary slot sits at
   the end of the roll of the environment that owns it, and nowhere else: a
   child roll inherits its ancestors' numbered frames but not their temporary
   ones.
@@ -82,9 +87,12 @@ shell/
   switcher/  grid/  bar/  notifications/
   fonts/               Recursive (OFL), see LICENSE-Recursive.txt
 scripts/               lab.py, seed.sh, run.sh, record.sh, demo.sh, headless.sh,
+                       grid-wrap-demo.sh, grid-scroll-demo.sh (grid layout clips),
                        sticking-test.sh, sticking-demo.sh (hyprnav hard-sticking checks),
                        agent-demo + agent-demo-app.py (GTK4 demo agent: countdown, then an approval dialog)
-lab-tools/             nix expression for the lab compositor tools (self-contained)
+lab-tools/             nix expression for the lab compositor tools (self-contained):
+                       cage, the virtual seat, hns-lab-scroll (pointer and wheel
+                       injection), wtype, wf-recorder
 design/                direction and notes
 recordings/            mp4 output
 ```
