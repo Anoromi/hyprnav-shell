@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import "services" as Services
@@ -23,9 +24,9 @@ PanelWindow {
     // The daemon pushes the whole registry on every change; no polling.
     readonly property var agents: Services.Hyprnav.agents
 
-    // Window geometry straight from Quickshell's toplevel cache, which holds
-    // the same objects `hyprctl -j clients` returns. The cache is refreshed on
-    // the compositor events that can move or unmap a window, never on a timer.
+    // Quickshell's toplevel cache gives us the first frame without a process.
+    // Hyprland does not emit a raw event for every pixel move, so query current
+    // geometry while a driven window is visible.
     readonly property var clients: {
         const out = [];
         for (const t of Hyprland.toplevels.values) {
@@ -62,6 +63,24 @@ PanelWindow {
         }
     }
 
+    property var polledClients: []
+    Timer {
+        interval: 150
+        repeat: true
+        running: win.visibleTargets.length > 0
+        onTriggered: if (!geometryProbe.running) geometryProbe.running = true
+    }
+    Process {
+        id: geometryProbe
+        command: ["hyprctl", "-j", "clients"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try { win.polledClients = JSON.parse(text); }
+                catch (e) { console.log("badge geometry query failed", e); }
+            }
+        }
+    }
+
     readonly property var monitor: Hyprland.monitors.values.find(m => m.name === win.screen.name) ?? null
     readonly property int activeWs: monitor && monitor.activeWorkspace ? monitor.activeWorkspace.id : -1
 
@@ -73,7 +92,8 @@ PanelWindow {
             if (a.state === "finished") continue;
             const addr = a.current_target; if (!addr) continue;
             if (a.last_beat_ms < recent && a.state !== "waiting_for_user") continue;
-            const c = clients.find(c => "0x" + c.address.replace(/^0x/, "") === addr && c.mapped && c.workspace && c.workspace.id === activeWs);
+            const matches = c => "0x" + c.address.replace(/^0x/, "") === addr && c.mapped && c.workspace && c.workspace.id === activeWs;
+            const c = polledClients.find(matches) ?? clients.find(matches);
             if (!c) continue;
             out.push({ agent: a, client: c });
         }
