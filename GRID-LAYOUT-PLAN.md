@@ -1,9 +1,8 @@
 # Grid layout: wrapping, scrolling, temporary slots
 
-Status: scrolling implemented in the lab, 2026-09-23. Wrapping is implemented
-(commit 2ec84e7, clip published); scrolling is implemented and recorded
-(`recordings/grid-scroll.mp4`, evidence in TESTING.md); temporary-slot
-placement is in progress.
+Status: 2026-09-23. Wrapping (2ec84e7), scrolling (41dae6c) and temporary-slot placement
+(daemon da9db45, switcher 437b581) are all implemented in the lab and recorded; awaiting the
+user's judgement of the clips before the Nix input bumps.
 
 ## Decisions so far (user)
 
@@ -84,7 +83,7 @@ Done 2026-09-23, with two departures from the design above:
 
 ## Order
 
-1. Temporary-slot placement (daemon + switcher, running).
-2. Scrolling (this plan), recorded for review.
+1. Temporary-slot placement (daemon + switcher): done.
+2. Scrolling: done, recorded.
 3. User judges wrapping + scrolling from the clips.
 4. Nix input bumps for hyprnav and hyprnav-shell; testbed L2 run.
