@@ -195,7 +195,7 @@ PanelWindow {
                         border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, cellItem.hasWindows ? 0.35 : 0.12)
                         Shape {
                             anchors.fill: parent
-                            visible: cellItem.cell.inherited || cellItem.cell.temporary
+                        visible: !!(cellItem.cell.inherited || cellItem.cell.temporary)
                             ShapePath {
                                 strokeColor: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.4)
                                 strokeWidth: 1
