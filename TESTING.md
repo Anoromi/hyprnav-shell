@@ -55,6 +55,25 @@ palette, "New temporary slot and run…" with kitty, End to reach the new
 frame, rename, close all windows, the 30 s empty timer, release. Evidence
 table in the hyprnav repo (`TEMP-SLOTS-TESTING.md`).
 
+### Where a temporary slot shows (2026-09-23)
+
+A temporary slot appears at the end of the roll of the environment that owns
+it, and nowhere else. Checked in a lab of its own (`lab.py up` with
+`HNS_HYPRNAV_BIN` on a fresh daemon build) against `shell` with a temp on
+workspace 103 and its child `shell.docs` with a temp on 104:
+
+| Where | What is there |
+|---|---|
+| `ui_snapshot_grid`, `shell` row | slots 1, 2, 3, then 1000 (`Parent scratch`, ws 103) |
+| `ui_snapshot_grid`, `shell.docs` row | slots 1 and 3 inherited from `shell`, its own 2, then its own 1000 (`Docs scratch`, ws 104) — no ws 103 |
+| `ui_snapshot_switcher` | six numbered cards; neither ws 103 nor ws 104 |
+| Switcher overlay | same six cards, ring cycles through them only |
+
+The daemon does the filtering (`slot_indexes_for_environment` for the grid,
+`build_switcher_snapshot` for the MRU list). `Switcher.qml` drops any card
+whose grid cell is `unnumbered`/`temporary` as well, which keeps the shell
+right when it talks to an older daemon.
+
 Lessons: `Hyprland.dispatch` from Quickshell does not carry Lua dispatcher
 calls on 0.56; the grid runs `hyprctl dispatch` as a `Process`. `Palette` is a
 Qt type name, so the component is `CommandPalette`. Window actions read

@@ -16,7 +16,13 @@ PanelWindow {
     property bool open: false
     property int selected: 0
     property string phase: "closed"   // closed | open | activating | cancelling
-    readonly property var items: Services.Hyprnav.switcher ? Services.Hyprnav.switcher.items : []
+    readonly property var rawItems: Services.Hyprnav.switcher ? Services.Hyprnav.switcher.items : []
+    // Temporary workspaces live at the end of their own environment's grid row
+    // and nowhere else, so they stay out of the MRU list: neither a card nor a
+    // stop in the cycling order, and Alt-Tab can never land on one. The daemon
+    // already drops them from the switcher snapshot; this keeps an older daemon
+    // honest too.
+    readonly property var items: rawItems.filter(it => !win.isTemporary(it))
 
     visible: phase !== "closed"
     anchors { top: true; bottom: true; left: true; right: true }
@@ -30,7 +36,16 @@ PanelWindow {
         if (phase === "open") { step(reverse ? -1 : 1); return; }
         Services.Hyprnav.refreshSwitcher(reverse, res => {
             if (!res || res.items.length === 0) return;
-            selected = Math.max(0, Math.min(res.initial_index, res.items.length - 1));
+            // Re-point the daemon's initial index at the filtered list, so the
+            // ring starts on the same workspace it would have without temps.
+            const kept = res.items.filter(it => !win.isTemporary(it));
+            if (kept.length === 0) return;
+            const wanted = res.items[Math.max(0, Math.min(res.initial_index, res.items.length - 1))];
+            let index = -1;
+            for (let i = 0; i < kept.length; i++) {
+                if (kept[i].workspace_id === wanted.workspace_id && kept[i].slot_index === wanted.slot_index) { index = i; break; }
+            }
+            selected = index >= 0 ? index : Math.max(0, Math.min(res.initial_index, kept.length - 1));
             phase = "open"; open = true;
             keys.forceActiveFocus();
         });
@@ -65,6 +80,14 @@ PanelWindow {
         return best;
     }
     readonly property var selectedCell: cellFor(items[selected])
+
+    // A card is temporary when the grid cell on its workspace is one of the
+    // unnumbered, environment-owned slots. Without a grid snapshot nothing is
+    // dropped here and the daemon's own filter carries it.
+    function isTemporary(it) {
+        const c = cellFor(it);
+        return c !== null && (c.unnumbered === true || c.temporary === true);
+    }
 
     // Geometry
     readonly property int inset: 160

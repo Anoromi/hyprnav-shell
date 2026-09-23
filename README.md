@@ -10,14 +10,19 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
 
 - **Switcher**: most-recently-used workspaces as one row of live frames, a
   pencil ring that slides between them, the environment title below.
-  Tab / Shift+Tab step, Enter opens, Esc cancels, digits jump.
+  Tab / Shift+Tab step, Enter opens, Esc cancels, digits jump. Temporary
+  workspaces are left out: they are neither a card nor a stop in the cycling
+  order, so Alt-Tab never lands on one.
 - **Grid**: every hyprnav environment as a roll, every slot as a frame with a
   live thumbnail. Arrows or hjkl move, Enter opens, Shift+L locks the roll,
   digits open that frame, Esc closes. Inherited slots have a dashed frame.
   A roll wider than the window wraps onto further lines of the same roll;
   left and right walk it in reading order across a line break, up and down
   move between lines and leave the roll only from its first or last line,
-  Home and End are the roll's first and last frame.
+  Home and End are the roll's first and last frame. A temporary slot sits at
+  the end of the roll of the environment that owns it, and nowhere else: a
+  child roll inherits its ancestors' numbered frames but not their temporary
+  ones.
 - **Bar**: a 44 px column on the left edge. Current frame number on top, the
   rest of the roll as clickable digits below it, the environment title running
   along the edge, then tray, notifications, Wi-Fi, Bluetooth, sound, battery,
