@@ -28,10 +28,12 @@ Singleton {
 
     property var _queue: []
     property var _inflight: null
+    property var _socket: null
+    property int _retryDelay: 200
 
     function request(op, params, cb) {
         const body = Object.assign({ op: op }, params || {});
-        _queue.push({ line: JSON.stringify(body) + "\n", cb: cb || null });
+        _queue.push({ op: op, line: JSON.stringify(body) + "\n", cb: cb || null });
         _pump();
     }
 
@@ -39,17 +41,25 @@ Singleton {
     // own short connection, exactly like the Rust CLI client does. Holding a
     // connection open would block every other hyprnav client.
     function _pump() {
-        if (_inflight || _queue.length === 0 || socketPath === "" || sock.connected) return;
+        if (_inflight || _queue.length === 0 || socketPath === "" || _socket || requestRetry.running) return;
         _inflight = _queue.shift();
-        sock.connected = true;
+        _socket = requestSocket.createObject(root, { path: socketPath });
+        _socket.connected = true;
         timeout.restart();
+    }
+
+    function _closeSocket() {
+        const current = _socket;
+        _socket = null;
+        if (current) { current.connected = false; current.destroy(); }
     }
 
     function _handleLine(line) {
         timeout.stop();
+        _retryDelay = 200;
         const req = _inflight;
         _inflight = null;
-        sock.connected = false;
+        _closeSocket();
         let parsed = null;
         try { parsed = JSON.parse(line); } catch (e) { lastError = "bad json: " + line.slice(0, 120); }
         if (req && req.cb) {
@@ -60,36 +70,47 @@ Singleton {
         Qt.callLater(_pump);
     }
 
+    function _recoverRequest(reason) {
+        timeout.stop();
+        lastError = reason;
+        const req = _inflight;
+        _inflight = null;
+        // Snapshot reads are safe to retry. A mutation may have reached the
+        // daemon before the transport failed, so report that error instead.
+        if (req && ["status_get", "ui_snapshot_grid", "ui_snapshot_switcher"].includes(req.op)) _queue.unshift(req);
+        else if (req && req.cb) req.cb(null, { code: "socket", message: reason });
+        _closeSocket();
+        requestRetry.interval = _retryDelay;
+        requestRetry.restart();
+        _retryDelay = Math.min(_retryDelay * 2, 2000);
+    }
+
     Timer {
         id: timeout
         interval: 3000
         onTriggered: {
-            lastError = "request timed out";
-            const req = root._inflight; root._inflight = null;
-            sock.connected = false;
-            if (req && req.cb) req.cb(null, { code: "timeout", message: "hyprnav daemon did not answer" });
-            Qt.callLater(root._pump);
+            root._recoverRequest("request timed out");
         }
     }
 
-    Socket {
-        id: sock
-        path: root.socketPath
-        parser: SplitParser { splitMarker: "\n"; onRead: data => root._handleLine(data) }
-        onConnectionStateChanged: {
-            if (connected && root._inflight) { sock.write(root._inflight.line); sock.flush(); }
-            else if (!connected) {
-                if (root._inflight) {
-                    // Closed before answering: fail this request, move on.
-                    timeout.stop();
-                    const req = root._inflight; root._inflight = null;
-                    root.lastError = "daemon closed the connection";
-                    if (req && req.cb) req.cb(null, { code: "closed", message: root.lastError });
-                }
-                Qt.callLater(root._pump);
+    Timer {
+        id: requestRetry
+        interval: 200
+        onTriggered: { requestRetry.stop(); root._pump(); }
+    }
+
+    Component {
+        id: requestSocket
+        Socket {
+            id: transport
+            parser: SplitParser { splitMarker: "\n"; onRead: data => { if (root._socket === transport) root._handleLine(data); } }
+            onConnectionStateChanged: {
+                if (root._socket !== transport) return;
+                if (connected && root._inflight) { transport.write(root._inflight.line); transport.flush(); }
+                else if (!connected && root._inflight) root._recoverRequest("daemon closed the connection");
             }
+            onError: err => { if (root._socket === transport) root._recoverRequest("socket: " + err); }
         }
-        onError: err => { root.lastError = "socket: " + err; }
     }
     onSocketPathChanged: if (socketPath !== "") {
         connected = true;
