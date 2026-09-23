@@ -57,7 +57,7 @@ Singleton {
             else req.cb(null, parsed && parsed.error ? parsed.error : { code: "unknown", message: line });
         }
         if (parsed && !parsed.ok && parsed.error) lastError = parsed.error.code + ": " + parsed.error.message;
-        _pump();
+        Qt.callLater(_pump);
     }
 
     Timer {
@@ -68,7 +68,7 @@ Singleton {
             const req = root._inflight; root._inflight = null;
             sock.connected = false;
             if (req && req.cb) req.cb(null, { code: "timeout", message: "hyprnav daemon did not answer" });
-            root._pump();
+            Qt.callLater(root._pump);
         }
     }
 
@@ -78,13 +78,15 @@ Singleton {
         parser: SplitParser { splitMarker: "\n"; onRead: data => root._handleLine(data) }
         onConnectionStateChanged: {
             if (connected && root._inflight) { sock.write(root._inflight.line); sock.flush(); }
-            else if (!connected && root._inflight) {
-                // Closed before answering: fail this request, move on.
-                timeout.stop();
-                const req = root._inflight; root._inflight = null;
-                root.lastError = "daemon closed the connection";
-                if (req && req.cb) req.cb(null, { code: "closed", message: root.lastError });
-                root._pump();
+            else if (!connected) {
+                if (root._inflight) {
+                    // Closed before answering: fail this request, move on.
+                    timeout.stop();
+                    const req = root._inflight; root._inflight = null;
+                    root.lastError = "daemon closed the connection";
+                    if (req && req.cb) req.cb(null, { code: "closed", message: root.lastError });
+                }
+                Qt.callLater(root._pump);
             }
         }
         onError: err => { root.lastError = "socket: " + err; }
