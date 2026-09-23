@@ -13,39 +13,45 @@ ShellRoot {
     id: root
     readonly property string targetScreen: Quickshell.env("HNS_SCREEN") || ""
     readonly property var screens: Quickshell.screens.filter(s => root.targetScreen === "" || s.name === root.targetScreen)
+    // An unset value keeps the full lab shell. The packaged live launcher sets
+    // only the surfaces that can coexist with DMS.
+    readonly property string components: Quickshell.env("HNS_COMPONENTS") || ""
+    function hasComponent(name) {
+        return components === "" || components.split(",").some(part => part.trim() === name);
+    }
 
     Variants {
         id: switchers
-        model: root.screens
+        model: root.hasComponent("switcher") ? root.screens : []
         Switcher {}
     }
     function switcherWin() { return switchers.instances[0] ?? null; }
     Variants {
         id: grids
-        model: root.screens
+        model: root.hasComponent("grid") ? root.screens : []
         Grid {}
     }
     function gridWin() { return grids.instances[0] ?? null; }
     Variants {
         id: quick
-        model: root.screens
+        model: root.hasComponent("quick-settings") ? root.screens : []
         QuickSettings {}
     }
     Variants {
-        model: root.screens
+        model: root.hasComponent("bar") ? root.screens : []
         Bar { quickSettings: quick.instances.find(q => q.screen === screen) ?? null }
     }
     Variants {
-        model: root.screens
+        model: root.hasComponent("notifications") ? root.screens : []
         Popups { suppressed: quick.instances[0]?.shown ?? false }
     }
     Variants {
         id: captions
-        model: root.screens
+        model: root.hasComponent("caption") ? root.screens : []
         Caption {}
     }
     Variants {
-        model: root.screens
+        model: root.hasComponent("badges") ? root.screens : []
         AgentBadges {}
     }
     IpcHandler {

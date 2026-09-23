@@ -1,8 +1,8 @@
 # hyprnav-shell
 
-A Quickshell shell for Hyprland whose centrepiece is hyprnav navigation. It is
-an experiment: it runs on a headless output or in a disposable lab compositor
-and does not replace the live desktop shell.
+A Quickshell shell for Hyprland whose centrepiece is hyprnav navigation. The
+lab runs the full shell on a headless output. The Nix package runs its
+navigation surfaces beside DMS in the live session.
 
 Design direction: a photographer's contact sheet. See [design/DIRECTION.md](design/DIRECTION.md).
 
@@ -24,6 +24,21 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
 - **Notifications**: popups top right, kept in history.
 
 ## Run
+
+Build the live package with `nix build .#hyprnav-shell`. Its launcher is
+`result/bin/hyprnav-shell`; `result/bin/hyprnav-shell ipc call grid toggle`
+targets the same packaged shell. The launcher uses the pinned Quickshell,
+loads QML and fonts from the Nix store, clears `HNS_SCREEN`, and defaults
+`HNS_COMPONENTS` to `switcher,grid,badges,caption`.
+On Ubuntu, the Nix config can pass its Quickshell override with
+`hyprnav-shell.override { quickshell = ubuntuQuickshell; }` once that override
+provides Quickshell 0.3.1 or newer. The flake exports `packages.<system>.quickshell`
+from the same pin so DMS and this package can use one Quickshell build.
+
+`HNS_COMPONENTS` is a comma-separated list of `switcher`, `grid`, `badges`,
+`caption`, `bar`, `quick-settings`, and `notifications`. An unset value in a
+direct `qs -p shell` run enables all components for the lab. Set it explicitly
+to select surfaces; the live launcher leaves an explicit value alone.
 
 ```sh
 nix-build lab-tools -o lab-tools/result   # once: cage, virtual seat, wtype, wf-recorder
