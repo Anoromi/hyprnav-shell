@@ -11,7 +11,7 @@ PIDF=/tmp/hns-record.pid
 case "${1:-}" in
   start)
     OUT="$HERE/recordings/${2:-clip}.mp4"
-    "$WF" -o "$SCREEN" -f "$OUT" -y -r 60 -c libx264 -p crf=18 -p preset=veryfast >/tmp/hns-record.log 2>&1 &
+    "$WF" -o "$SCREEN" -f "$OUT" -y -r "${HNS_RECORD_FPS:-60}" -c libx264 -p crf=18 -p preset=veryfast >/tmp/hns-record.log 2>&1 &
     echo $! >"$PIDF"; echo "recording $OUT"
     ;;
   stop)

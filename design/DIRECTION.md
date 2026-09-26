@@ -72,12 +72,22 @@ inside the frame's top-left corner like a film edge marking. Empty slots are
 Emulsion fill with the launch command name in Fixer. Inherited slots have a
 dashed border. The locked roll has a small Pencil tick after its title.
 
-Bar: a 44 px column on the left edge, the film strip's edge. Top: the roll's
-initials in Casual, then its frame numbers with the current one in Pencil.
-When the roll is locked its frames sit on a Pencil rail with a lock at its
-head, the grease-pencil mark along a chosen strip, and the current frame
-inverts. No title along the edge: sideways text at bar width does not read;
-hovering the initials names the roll. Bottom: tray, network,
+Bar: a 44 px column on the left edge, the film strip's edge. Top: the
+workspace selector. Unlocked, it is every workspace on the screen, 1 and up
+in id order, the current one in a Pencil block, occupied ones in Paper,
+empty ones in Fixer; special and hyprnav-managed workspaces (101 and up) are
+left out unless on screen, and then the managed one is listed last under its
+frame number, never as "101". No initials; an open lock at the head offers to
+keep the current roll. Locked, the roll's initials in Casual sit above its
+frame numbers on a Pencil rail with a lock at its head, the grease-pencil
+mark along a chosen strip, and the current frame inverts. The two are one
+column of fixed rows: locking draws the rail out from behind the current
+frame over the group (160 ms, ease out cubic) and each digit takes its locked
+colour as the pencil reaches it; numbers that differ cross-fade in place,
+nothing moves or reflows, and the column keeps room for the longer list.
+Unlocking rubs the mark back into the block. No title along the edge:
+sideways text at bar width does not read; hovering the head names the roll.
+Bottom: tray, network,
 bluetooth, audio, battery, then the clock stacked HH over mm. Quick settings
 open as one sheet beside the bar, bottom left.
 

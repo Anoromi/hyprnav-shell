@@ -29,21 +29,34 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
   child roll inherits its ancestors' numbered frames but not their temporary
   ones.
 - **Bar**: a 44 px column on the left edge of every screen. On top, the
-  roll's monogram (the initials of the first two words of the environment
-  title that are not "and", "of", "the" and the like, or the first two
-  letters of a one-word title; rolls that would share one all get a digit,
-  numbered in environment id order) over its frame numbers in slot order,
-  the current one under a block that slides between them (each screen's bar
-  follows the workspace on that screen). Two looks: following focus, bare
-  digits with the monogram in Fixer and the current frame in Pencil; locked
-  to this roll, the frames sit on a Pencil rail with a lock at its head, the
-  current frame inverts to Darkroom and the monogram turns Pencil (120 ms,
-  the digits never move). Hovering the group shows the full title; clicking
-  the monogram locks or unlocks the roll (`lock_set` / `lock_clear`),
-  clicking another digit goes there, clicking the current one opens the
-  grid. Temporary frames are left out. The daemon records the environment of
-  every focused workspace as the lock, so the rail is the usual state and
-  the bare look shows after an unlock or on a roll the lock is not on. At
+  workspace selector (each screen's bar follows the workspace on that
+  screen). Unlocked, it lists every Hyprland workspace on the screen, ids 1
+  and up in id order, from Quickshell's `Hyprland.workspaces` (it follows
+  the compositor's create, destroy and focus events, and each workspace's
+  windows, without polling): the current one in a Pencil block, occupied
+  ones in Paper, empty ones in Fixer. Special workspaces and hyprnav's
+  managed workspaces (101 and up) are left out, except the one on screen,
+  which is listed last under its frame number in its roll instead of the
+  raw id. Clicking a number goes there (`workspace_goto_physical`); an open
+  lock above the list locks the current workspace's roll. Locked (the
+  current workspace belongs to the locked roll): the roll's monogram (the
+  initials of the first two words of the environment title that are not
+  "and", "of", "the" and the like, or the first two letters of a one-word
+  title; rolls that would share one all get a digit, numbered in
+  environment id order) over its numbered frames on a Pencil rail with a
+  lock at its head, digits in Darkroom, the current frame inverted to a
+  Darkroom block. Switching modes never moves a digit: the rows keep fixed
+  positions, the column keeps room for the longer list, the rail grows out
+  from behind the current frame over the group (160 ms, ease out cubic)
+  and each digit cross-fades to its locked colour as the rail reaches it; a
+  row whose number differs between the lists cross-fades in place, and
+  unlocking runs it back. Digits take the block's colour as it slides over
+  them. Hovering the head names the roll; clicking the monogram unlocks
+  (`lock_set` / `lock_clear`), clicking the current number opens the grid.
+  Temporary frames are left out. The daemon records the environment of
+  every focused workspace as the lock, so the rail is the usual state on a
+  roll's workspace and the full list shows after an unlock or on a
+  workspace outside the locked roll. At
   the bottom, on one 28 px rhythm: launcher and
   clipboard buttons (vicinae), the tray (icons drawn flat in Paper), the
   notification bell, the Wi-Fi/Bluetooth/sound/battery cluster that opens
@@ -160,7 +173,7 @@ scripts/               lab.py, seed.sh, run.sh, record.sh, demo.sh, headless.sh,
                        sticking-test.sh, sticking-demo.sh (hyprnav hard-sticking checks),
                        agent-demo + agent-demo-app.py (GTK4 demo agent: countdown, then an approval dialog),
                        tray-test.py (a StatusNotifierItem with a menu), bar-demo.sh (bar clip),
-                       bar-selector-demo.sh (roll selector: lock and frames),
+                       bar-selector-demo.sh (workspace selector: all workspaces, lock rail),
                        bar-polish-demo.sh (control centre speed, click-away, motion)
 lab-tools/             nix expression for the lab compositor tools (self-contained):
                        cage, the virtual seat, hns-lab-scroll (pointer moves,
