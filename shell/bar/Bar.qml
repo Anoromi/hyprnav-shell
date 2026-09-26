@@ -12,8 +12,8 @@ import QtQuick.Effects
 import "../services" as Services
 import ".."
 
-// Left edge column, like the edge of a film strip: the roll's frame numbers
-// run down it, the environment title reads along it. The bottom stacks, from
+// Left edge column, like the edge of a film strip: the roll's monogram and
+// frame numbers run down it. The bottom stacks, from
 // the top: launcher and clipboard, tray, the notification bell, the system
 // cluster (opens quick settings), the clock.
 PanelWindow {
@@ -121,104 +121,153 @@ PanelWindow {
 
     Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: Theme.emulsion }
 
-    // Top: the roll's frames in order, the current one under a Pencil block
-    // that slides between them (the switcher ring's spring), so a workspace
-    // change reads as movement along the strip rather than a reshuffle.
+    // Top: the roll. Its monogram (initials of the environment title) sits
+    // above its frames in slot order; the current frame is under a block that
+    // slides between them (the switcher ring's spring), so a workspace change
+    // reads as movement along the strip rather than a reshuffle.
+    //
+    // Two modes, told apart by the whole group rather than a glyph. Following
+    // focus (default): bare digits on the bar, the monogram in Fixer, the
+    // current frame in a Pencil block. Locked to this roll: the frames sit on
+    // a Pencil rail with a lock at its top, the way a grease pencil marks a
+    // strip on the contact sheet; digits turn Darkroom, the current frame
+    // inverts to a Darkroom block, the monogram turns Pencil. Clicking the
+    // monogram locks or unlocks the roll; hovering the group names it.
     readonly property var frames: roll.map(c => c.snapshot).filter(c => c && !c.unnumbered)
     readonly property int activeIndex: cell ? frames.findIndex(c => c.slot_index === cell.slot_index) : -1
     readonly property int pipStep: 28 + Theme.s4
+    readonly property string envTitle: cell ? (cell.environment_title || cell.environment_name || cell.environment_id || "") : ""
+    readonly property bool locked: cell !== null && (cell.environment_locked === true || Services.Hyprnav.lockedEnv === cell.environment_id)
+    readonly property int lockRow: 18        // rail head that holds the lock
+    function rollTip() { return envTitle + (locked ? " (locked)\nClick the initials to follow focus" : "\nClick the initials to lock"); }
+    function toggleLock() {
+        if (!cell) return;
+        if (locked) Services.Hyprnav.unlock(); else Services.Hyprnav.lock(cell.environment_id);
+    }
     Item {
         id: top
         anchors.top: parent.top; anchors.topMargin: Theme.s12
         anchors.horizontalCenter: parent.horizontalCenter
-        width: 28
-        height: bar.frames.length > 0 ? pips.height : 28
+        width: 36
+        height: bar.frames.length > 0 ? strip.y + strip.height + Theme.s4 : bare.y + bare.height
+
+        HoverHandler {
+            id: rollHover
+            enabled: bar.cell !== null
+            onHoveredChanged: hovered ? bar.tip(monogram, bar.rollTip()) : bar.untip()
+        }
+        Connections {
+            target: bar
+            function onLockedChanged() { if (rollHover.hovered) bar.tip(monogram, bar.rollTip()); }
+        }
+
+        // Monogram: the roll's name at a glance, and the lock switch.
+        Pressable {
+            id: monogram
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: 36; height: 24; radius: Theme.rFrame
+            visible: bar.cell !== null
+            onClicked: bar.toggleLock()
+            Text {
+                anchors.centerIn: parent
+                text: bar.cell ? Services.Hyprnav.monogramFor(bar.cell.environment_id) : ""
+                color: bar.locked ? Theme.pencil : Theme.fixer
+                font.family: Theme.casual; font.pixelSize: Theme.fs15; font.weight: Font.Bold
+                Behavior on color { ColorAnimation { duration: Theme.tHover } }
+            }
+        }
 
         // A workspace outside hyprnav: its bare number, no roll.
         Rectangle {
+            id: bare
             width: 28; height: 28; radius: Theme.rFrame
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: monogram.visible ? monogram.height + Theme.s4 : 0
             color: Theme.emulsion
             visible: bar.frames.length === 0 || bar.activeIndex < 0 && bar.cell === null
-            opacity: visible ? 1 : 0
             Text { anchors.centerIn: parent; text: bar.focusedWs ? bar.focusedWs.id : ""; color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs15 }
         }
+
+        // The rail and the lock at its head. The head is reserved in both
+        // modes so the digits never move when the lock changes.
         Rectangle {
-            id: pencil
-            width: 28; height: 28; radius: Theme.rFrame
+            id: rail
+            visible: bar.frames.length > 0
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: monogram.height + Theme.s4
+            width: 36; height: bar.lockRow + pips.height + Theme.s4 * 2
+            radius: Theme.rSheet - 2
             color: Theme.pencil
-            visible: bar.frames.length > 0
-            opacity: bar.activeIndex >= 0 ? 1 : 0
-            property real target: Math.max(0, bar.activeIndex) * bar.pipStep
-            y: target
-            Behavior on y { enabled: !Theme.reducedMotion; SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.2 } }
-            Behavior on opacity { NumberAnimation { duration: Theme.tHover } }
+            opacity: bar.locked ? 1 : 0
+            transformOrigin: Item.Top
+            scale: bar.locked ? 1 : 0.96
+            Behavior on opacity { NumberAnimation { duration: Theme.tHover; easing.type: Easing.OutCubic } }
+            Behavior on scale { NumberAnimation { duration: Theme.tHover; easing.type: Easing.OutCubic } }
+            Glyph {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: Theme.s4; height: bar.lockRow - 2
+                text: "󰌾"; size: 13; color: Theme.darkroom
+            }
+            MouseArea { width: parent.width; height: bar.lockRow + Theme.s4; onClicked: bar.toggleLock() }
         }
-        Column {
-            id: pips
+
+        Item {
+            id: strip
             visible: bar.frames.length > 0
-            spacing: Theme.s4
-            Repeater {
-                model: bar.frames
-                Item {
-                    id: pip
-                    required property var modelData
-                    required property int index
-                    readonly property bool current: index === bar.activeIndex
-                    width: 28; height: 28
-                    Rectangle {
-                        anchors.fill: parent; radius: Theme.rFrame
-                        color: pipMouse.containsMouse && !pip.current ? Theme.hover : "transparent"
-                        Behavior on color { ColorAnimation { duration: Theme.tHover } }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        text: pip.modelData.slot_index
-                        color: pip.current ? Theme.darkroom : (pip.modelData.window_count > 0 ? Theme.paper : Theme.fixer)
-                        font.family: Theme.mono; font.pixelSize: pip.current ? Theme.fs18 : Theme.fs15
-                        font.weight: pip.current ? Font.Bold : Font.Normal
-                        Behavior on color { ColorAnimation { duration: Theme.tHover } }
-                    }
-                    // Pin: a spawned process tree is stuck to this frame.
-                    Glyph { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: -3; anchors.topMargin: -5; visible: pip.modelData.stuck === true; text: "󰐃"; size: 12; color: Theme.pencil }
-                    MouseArea {
-                        id: pipMouse; anchors.fill: parent; hoverEnabled: true
-                        onClicked: pip.current
-                            ? Quickshell.execDetached(["qs", "-p", Quickshell.shellDir, "ipc", "call", "grid", "toggle"])
-                            : Services.Hyprnav.gotoSlot(pip.modelData.environment_id, pip.modelData.slot_index)
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: rail.y + bar.lockRow + Theme.s4
+            width: 28; height: pips.height
+            Rectangle {
+                id: pencil
+                width: 28; height: 28; radius: Theme.rFrame
+                color: bar.locked ? Theme.darkroom : Theme.pencil
+                opacity: bar.activeIndex >= 0 ? 1 : 0
+                y: Math.max(0, bar.activeIndex) * bar.pipStep
+                Behavior on y { enabled: !Theme.reducedMotion; SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.2 } }
+                Behavior on opacity { NumberAnimation { duration: Theme.tHover } }
+                Behavior on color { ColorAnimation { duration: Theme.tHover } }
+            }
+            Column {
+                id: pips
+                spacing: Theme.s4
+                Repeater {
+                    model: bar.frames
+                    Item {
+                        id: pip
+                        required property var modelData
+                        required property int index
+                        readonly property bool current: index === bar.activeIndex
+                        readonly property bool filled: modelData.window_count > 0
+                        width: 28; height: 28
+                        Rectangle {
+                            anchors.fill: parent; radius: Theme.rFrame
+                            color: !pipMouse.containsMouse || pip.current ? "transparent"
+                                : (bar.locked ? Qt.rgba(0.102, 0.098, 0.090, 0.14) : Theme.hover)
+                            Behavior on color { ColorAnimation { duration: Theme.tHover } }
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            text: pip.modelData.slot_index
+                            color: bar.locked
+                                ? (pip.current ? Theme.pencil : Theme.darkroom)
+                                : (pip.current ? Theme.darkroom : (pip.filled ? Theme.paper : Theme.fixer))
+                            opacity: bar.locked && !pip.current && !pip.filled ? 0.55 : 1
+                            font.family: Theme.mono; font.pixelSize: pip.current ? Theme.fs18 : Theme.fs15
+                            font.weight: pip.current ? Font.Bold : Font.Normal
+                            Behavior on color { ColorAnimation { duration: Theme.tHover } }
+                            Behavior on opacity { NumberAnimation { duration: Theme.tHover } }
+                        }
+                        // Pin: a spawned process tree is stuck to this frame.
+                        Glyph { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: -3; anchors.topMargin: -5; visible: pip.modelData.stuck === true; text: "󰐃"; size: 12; color: bar.locked ? Theme.darkroom : Theme.pencil }
+                        MouseArea {
+                            id: pipMouse; anchors.fill: parent; hoverEnabled: true
+                            onClicked: pip.current
+                                ? Quickshell.execDetached(["qs", "-p", Quickshell.shellDir, "ipc", "call", "grid", "toggle"])
+                                : Services.Hyprnav.gotoSlot(pip.modelData.environment_id, pip.modelData.slot_index)
+                        }
                     }
                 }
             }
-        }
-    }
-
-    // Middle: environment title along the edge, reading bottom to top, and a
-    // small Pencil lock after it when the roll is locked.
-    Item {
-        id: middle
-        anchors.top: top.bottom; anchors.topMargin: Theme.s16
-        anchors.bottom: bottomStack.top; anchors.bottomMargin: Theme.s16
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: parent.width
-        clip: true
-        readonly property string title: bar.cell ? (bar.cell.environment_title || bar.cell.environment_name || bar.cell.environment_id || "") : "No environment"
-        readonly property bool locked: bar.cell !== null && bar.cell.environment_locked === true
-        Row {
-            id: titleRow
-            transform: Rotation { angle: -90 }
-            x: (middle.width - height) / 2
-            y: middle.height
-            spacing: Theme.s8
-            Text {
-                id: envTitle
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.min(implicitWidth, middle.height - (lockMark.visible ? lockMark.width + Theme.s8 : 0))
-                text: middle.title
-                elide: Text.ElideRight
-                color: bar.cell ? Theme.paper : Theme.fixer
-                font.family: Theme.casual; font.pixelSize: Theme.fs15; font.weight: Font.Medium
-                Behavior on color { ColorAnimation { duration: Theme.tHover } }
-            }
-            Glyph { id: lockMark; anchors.verticalCenter: parent.verticalCenter; visible: middle.locked; text: "󰌾"; size: 13; color: Theme.pencil; rotation: 90 }
         }
     }
 

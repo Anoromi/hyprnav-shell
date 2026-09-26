@@ -209,6 +209,37 @@ Singleton {
 
     readonly property string lockedEnv: status && status.locked_environment_id ? status.locked_environment_id : ""
 
+    // Short name for each roll, for the bar: the initials of the first two
+    // words of the title that are not "and", "of", "the" and the like
+    // ("Design Hypernav Workspace UI" is "DH"), or the first two letters of
+    // a one-word title ("Sh"). Rolls whose initials collide all get a digit,
+    // numbered in environment id order ("DH1", "DH2"), so the same set of
+    // rolls always gets the same names.
+    readonly property var monograms: {
+        const skip = ["a", "an", "and", "the", "of", "for", "to", "in", "on", "with", "at", "by", "or"];
+        const base = {};
+        for (const r of rows) {
+            const title = r.title || r.displayId || r.envId || "";
+            const all = title.split(/[^A-Za-z0-9\u00C0-\uFFFF]+/).filter(w => w.length > 0);
+            const words = all.filter(w => !skip.includes(w.toLowerCase()));
+            const use = words.length > 0 ? words : all;
+            let code = "";
+            if (use.length >= 2) code = (use[0][0] + use[1][0]).toUpperCase();
+            else if (use.length === 1) code = use[0][0].toUpperCase() + (use[0].length > 1 ? use[0][1].toLowerCase() : "");
+            else code = "?";
+            base[r.envId] = code;
+        }
+        const groups = {};
+        for (const id in base) (groups[base[id]] = groups[base[id]] || []).push(id);
+        const out = {};
+        for (const code in groups) {
+            const ids = groups[code].sort();
+            ids.forEach((id, i) => out[id] = ids.length > 1 ? code + (i + 1) : code);
+        }
+        return out;
+    }
+    function monogramFor(envId) { return monograms[envId] ?? ""; }
+
     // Rows derived from the grid snapshot, for the grid overlay and the bar.
     //
     // These are long-lived GridRow/GridCell objects rather than plain JSON, and

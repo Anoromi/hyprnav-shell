@@ -28,12 +28,23 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
   the end of the roll of the environment that owns it, and nowhere else: a
   child roll inherits its ancestors' numbered frames but not their temporary
   ones.
-- **Bar**: a 44 px column on the left edge of every screen. The roll's frame
-  numbers on top in slot order, the current one under a Pencil block that
-  slides between them (each screen's bar follows the workspace on that
-  screen); clicking another digit goes there, clicking the current one opens
-  the grid. The environment title runs along the edge with a Pencil lock when
-  the roll is locked. At the bottom, on one 28 px rhythm: launcher and
+- **Bar**: a 44 px column on the left edge of every screen. On top, the
+  roll's monogram (the initials of the first two words of the environment
+  title that are not "and", "of", "the" and the like, or the first two
+  letters of a one-word title; rolls that would share one all get a digit,
+  numbered in environment id order) over its frame numbers in slot order,
+  the current one under a block that slides between them (each screen's bar
+  follows the workspace on that screen). Two looks: following focus, bare
+  digits with the monogram in Fixer and the current frame in Pencil; locked
+  to this roll, the frames sit on a Pencil rail with a lock at its head, the
+  current frame inverts to Darkroom and the monogram turns Pencil (120 ms,
+  the digits never move). Hovering the group shows the full title; clicking
+  the monogram locks or unlocks the roll (`lock_set` / `lock_clear`),
+  clicking another digit goes there, clicking the current one opens the
+  grid. Temporary frames are left out. The daemon records the environment of
+  every focused workspace as the lock, so the rail is the usual state and
+  the bare look shows after an unlock or on a roll the lock is not on. At
+  the bottom, on one 28 px rhythm: launcher and
   clipboard buttons (vicinae), the tray (icons drawn flat in Paper), the
   notification bell, the Wi-Fi/Bluetooth/sound/battery cluster that opens
   quick settings, and a stacked clock. Buttons lift onto an Emulsion wash on
@@ -149,6 +160,7 @@ scripts/               lab.py, seed.sh, run.sh, record.sh, demo.sh, headless.sh,
                        sticking-test.sh, sticking-demo.sh (hyprnav hard-sticking checks),
                        agent-demo + agent-demo-app.py (GTK4 demo agent: countdown, then an approval dialog),
                        tray-test.py (a StatusNotifierItem with a menu), bar-demo.sh (bar clip),
+                       bar-selector-demo.sh (roll selector: lock and frames),
                        bar-polish-demo.sh (control centre speed, click-away, motion)
 lab-tools/             nix expression for the lab compositor tools (self-contained):
                        cage, the virtual seat, hns-lab-scroll (pointer moves,

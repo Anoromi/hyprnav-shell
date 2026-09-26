@@ -72,9 +72,12 @@ inside the frame's top-left corner like a film edge marking. Empty slots are
 Emulsion fill with the launch command name in Fixer. Inherited slots have a
 dashed border. The locked roll has a small Pencil tick after its title.
 
-Bar: a 44 px column on the left edge, the film strip's edge. Top: the current
-frame number in Pencil, the rest of the roll as digits below. Middle: the
-environment title set along the edge, reading upward. Bottom: tray, network,
+Bar: a 44 px column on the left edge, the film strip's edge. Top: the roll's
+initials in Casual, then its frame numbers with the current one in Pencil.
+When the roll is locked its frames sit on a Pencil rail with a lock at its
+head, the grease-pencil mark along a chosen strip, and the current frame
+inverts. No title along the edge: sideways text at bar width does not read;
+hovering the initials names the roll. Bottom: tray, network,
 bluetooth, audio, battery, then the clock stacked HH over mm. Quick settings
 open as one sheet beside the bar, bottom left.
 
