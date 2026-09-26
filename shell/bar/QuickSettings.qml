@@ -6,19 +6,21 @@ import Quickshell.Wayland
 import Quickshell.Networking
 import Quickshell.Bluetooth
 import Quickshell.Services.UPower
+import Quickshell.Hyprland
 import "../services" as Services
-import "../notifications"
 import ".."
 
-// One sheet under the right end of the bar: network, bluetooth, sound,
-// brightness, notifications. Opens from the bar cluster or `qs ipc call qs toggle`.
+// One sheet beside the bottom of the bar: quick tiles (night light, do not
+// disturb, screenshots), power profile, then network, bluetooth, sound and
+// brightness. Opens from the bar cluster or `qs ipc call qs toggle`. The
+// notification history lives in the notification centre.
 PanelWindow {
     id: qs
     required property var modelData
     screen: modelData
     property bool shown: false
     property string phase: "closed"
-    property string section: "wifi"      // wifi | bluetooth | sound | notifications
+    property string section: "wifi"      // wifi | bluetooth | sound
 
     visible: phase !== "closed"
     anchors { bottom: true; left: true }
@@ -32,7 +34,8 @@ PanelWindow {
     WlrLayershell.keyboardFocus: shown ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
     function toggle() { if (shown) close(); else show(); }
-    function show() { phase = "open"; shown = true; if (bar.wifiDev) bar.wifiDev.scannerEnabled = true; }
+    signal opened()
+    function show() { phase = "open"; shown = true; if (bar.wifiDev) bar.wifiDev.scannerEnabled = true; Services.NightLight.probe(); opened(); }
     function close() { if (!shown) return; shown = false; phase = "closing"; finish.restart(); if (bar.wifiDev) bar.wifiDev.scannerEnabled = false; }
     Timer { id: finish; interval: Theme.tScrim; onTriggered: qs.phase = "closed" }
 
@@ -46,6 +49,39 @@ PanelWindow {
         readonly property var battery: UPower.displayDevice
     }
     property var pendingNetwork: null   // network awaiting a password
+
+    function batteryState() {
+        const b = bar.battery; if (!b) return "";
+        const pct = Math.round(b.percentage * 100) + "%";
+        switch (b.state) {
+        case UPowerDeviceState.Charging: return "Charging, " + pct;
+        case UPowerDeviceState.FullyCharged: return "Plugged in, full";
+        case UPowerDeviceState.PendingCharge: return "Plugged in, not charging, " + pct;
+        case UPowerDeviceState.Empty: return "Empty";
+        default: return "On battery, " + pct;
+        }
+    }
+    function batteryTime() {
+        const b = bar.battery; if (!b) return "";
+        const fmt = s => Math.floor(s / 3600) + "h " + Math.round((s % 3600) / 60) + "m";
+        if (b.state === UPowerDeviceState.Charging && b.timeToFull > 0) return fmt(b.timeToFull) + " to full";
+        if (b.state === UPowerDeviceState.Discharging && b.timeToEmpty > 0) return fmt(b.timeToEmpty) + " left";
+        return "";
+    }
+
+    // Screenshots: the sheet closes first so it is not in the picture. Saved
+    // under ~/Pictures/Screenshots and copied to the clipboard.
+    property string shotMode: ""
+    Timer { id: shotDelay; interval: Theme.tScrim + 150; onTriggered: {
+        const out = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
+        const grab = qs.shotMode === "area" ? 'g=$(slurp) || exit 0; grim -g "$g" "$f"' : 'grim ${OUT:+-o "$OUT"} "$f"';
+        Quickshell.execDetached({
+            command: ["sh", "-c",
+                'd="${XDG_PICTURES_DIR:-$HOME/Pictures}/Screenshots"; mkdir -p "$d"; f="$d/$(date +%F_%H-%M-%S).png"; ' + grab +
+                ' && { wl-copy --type image/png < "$f"; notify-send -a Screenshot -i "$f" "Screenshot saved" "$f"; }'],
+            environment: { OUT: out }
+        });
+    } }
 
     Rectangle {
         id: sheet
@@ -64,6 +100,85 @@ PanelWindow {
             anchors { left: parent.left; right: parent.right; top: parent.top; margins: Theme.s12 }
             spacing: Theme.s12
 
+            // Quick tiles: one click each, state in the tile.
+            Row {
+                spacing: Theme.s4
+                Repeater {
+                    model: [
+                        { id: "night", glyph: "󰖔", label: "Night light",
+                          sub: !Services.NightLight.available ? "Not installed" : Services.NightLight.active ? Services.NightLight.temperature + " K" : "Off",
+                          on: Services.NightLight.active, enabled: Services.NightLight.available },
+                        { id: "dnd", glyph: Services.Notifs.dnd ? "󰂛" : "󰂚", label: "Do not disturb",
+                          sub: Services.Notifs.dnd ? "On" : "Off", on: Services.Notifs.dnd, enabled: Services.Notifs.enabled },
+                        { id: "area", glyph: "󰩭", label: "Screenshot", sub: "Area", on: false, enabled: true },
+                        { id: "screen", glyph: "󰹑", label: "Screenshot", sub: "Screen", on: false, enabled: true }
+                    ]
+                    Rectangle {
+                        id: tile
+                        required property var modelData
+                        width: 91; height: 60; radius: 6
+                        opacity: modelData.enabled ? 1 : 0.5
+                        color: modelData.on || tileMouse.containsMouse ? Theme.emulsion : "transparent"
+                        border.color: modelData.on ? Theme.pencil : Theme.emulsion
+                        Behavior on color { ColorAnimation { duration: Theme.tFast } }
+                        Column {
+                            anchors.centerIn: parent; spacing: 1
+                            Glyph { anchors.horizontalCenter: parent.horizontalCenter; text: tile.modelData.glyph; size: 18; color: tile.modelData.on ? Theme.pencil : Theme.paper }
+                            Text { anchors.horizontalCenter: parent.horizontalCenter; text: tile.modelData.label; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs12; fontSizeMode: Text.HorizontalFit; minimumPixelSize: 10; width: 86; horizontalAlignment: Text.AlignHCenter }
+                            Text { anchors.horizontalCenter: parent.horizontalCenter; text: tile.modelData.sub; color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs12 }
+                        }
+                        MouseArea {
+                            id: tileMouse
+                            anchors.fill: parent; hoverEnabled: true
+                            enabled: tile.modelData.enabled
+                            onClicked: {
+                                switch (tile.modelData.id) {
+                                case "night": Services.NightLight.toggle(); break;
+                                case "dnd": Services.Notifs.setDnd(!Services.Notifs.dnd); break;
+                                default: qs.shotMode = tile.modelData.id; qs.close(); shotDelay.restart();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Power profile (power-profiles-daemon over D-Bus).
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.s4
+                Repeater {
+                    model: [
+                        { p: PowerProfile.PowerSaver, glyph: "󰌪", label: "Saver" },
+                        { p: PowerProfile.Balanced, glyph: "󰾅", label: "Balanced" },
+                        { p: PowerProfile.Performance, glyph: "󰓅", label: "Performance" }
+                    ].filter(m => m.p !== PowerProfile.Performance || PowerProfiles.hasPerformanceProfile)
+                    Rectangle {
+                        id: seg
+                        required property var modelData
+                        readonly property bool on: PowerProfiles.profile === modelData.p
+                        Layout.fillWidth: true
+                        height: 32; radius: 6
+                        color: on || segMouse.containsMouse ? Theme.emulsion : "transparent"
+                        border.color: on ? Theme.pencil : Theme.emulsion
+                        Behavior on color { ColorAnimation { duration: Theme.tFast } }
+                        Row {
+                            anchors.centerIn: parent; spacing: 6
+                            Glyph { text: seg.modelData.glyph; size: 15; color: seg.on ? Theme.pencil : Theme.paper }
+                            Text { text: seg.modelData.label; color: seg.on ? Theme.paper : Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13; anchors.verticalCenter: parent.verticalCenter }
+                        }
+                        MouseArea { id: segMouse; anchors.fill: parent; hoverEnabled: true; onClicked: PowerProfiles.profile = seg.modelData.p }
+                    }
+                }
+            }
+            Text {
+                visible: PowerProfiles.degradationReason !== PerformanceDegradationReason.None
+                text: "Performance limited: " + PerformanceDegradationReason.toString(PowerProfiles.degradationReason)
+                color: Theme.warn; font.family: Theme.sans; font.pixelSize: Theme.fs12
+            }
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.emulsion }
+
             // Section tabs, each with its live state
             Row {
                 spacing: Theme.s4
@@ -71,20 +186,19 @@ PanelWindow {
                     model: [
                         { id: "wifi", glyph: "󰖩", label: bar.wifiDev && bar.networks.find(n => n.connected) ? bar.networks.find(n => n.connected).name : "Wi-Fi" },
                         { id: "bluetooth", glyph: "󰂯", label: bar.btAdapter && bar.btAdapter.enabled ? (bar.btDevices.filter(d => d.connected).length + " connected") : "Bluetooth off" },
-                        { id: "sound", glyph: Services.Audio.icon(), label: Math.round(Services.Audio.volume * 100) + "%" },
-                        { id: "notifications", glyph: "󰂚", label: Services.Notifs.unread > 0 ? Services.Notifs.unread + " new" : "Quiet" }
+                        { id: "sound", glyph: Services.Audio.icon(), label: Math.round(Services.Audio.volume * 100) + "%" }
                     ]
                     Rectangle {
                         required property var modelData
                         readonly property bool on: qs.section === modelData.id
-                        width: 91; height: 56; radius: 6
+                        width: 122; height: 56; radius: 6
                         color: on ? Theme.emulsion : "transparent"
                         border.color: on ? Theme.pencil : "transparent"
                         Behavior on color { ColorAnimation { duration: Theme.tFast } }
                         Column {
                             anchors.centerIn: parent; spacing: 2
                             Glyph { anchors.horizontalCenter: parent.horizontalCenter; text: parent.parent.modelData.glyph; size: 18; color: parent.parent.on ? Theme.pencil : Theme.paper }
-                            Text { anchors.horizontalCenter: parent.horizontalCenter; text: parent.parent.modelData.label; color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs12; elide: Text.ElideRight; width: 84; horizontalAlignment: Text.AlignHCenter }
+                            Text { anchors.horizontalCenter: parent.horizontalCenter; text: parent.parent.modelData.label; color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs12; elide: Text.ElideRight; width: 114; horizontalAlignment: Text.AlignHCenter }
                         }
                         MouseArea { anchors.fill: parent; onClicked: qs.section = parent.modelData.id }
                     }
@@ -241,29 +355,8 @@ PanelWindow {
                 RowLayout {
                     visible: bar.battery && bar.battery.isPresent
                     Layout.topMargin: Theme.s4
-                    Text { text: bar.battery ? (bar.battery.state === UPowerDeviceState.Charging ? "Charging, " : "On battery, ") + Math.round(bar.battery.percentage * 100) + "%" : ""; color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13; Layout.fillWidth: true }
-                    Text { text: bar.battery && bar.battery.timeToEmpty > 0 ? Math.floor(bar.battery.timeToEmpty / 3600) + "h " + Math.round((bar.battery.timeToEmpty % 3600) / 60) + "m left" : ""; color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13 }
-                }
-            }
-
-            // Notifications
-            ColumnLayout {
-                visible: qs.section === "notifications"
-                Layout.fillWidth: true
-                spacing: Theme.s8
-                RowLayout {
-                    Layout.fillWidth: true
-                    Text { text: "Notifications"; color: Theme.paper; font.family: Theme.casual; font.pixelSize: Theme.fs18; font.weight: Font.Medium; Layout.fillWidth: true }
-                    Text {
-                        visible: Services.Notifs.unread > 0
-                        text: "Clear all"; color: clearMouse.containsMouse ? Theme.paper : Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13
-                        MouseArea { id: clearMouse; anchors.fill: parent; hoverEnabled: true; onClicked: Services.Notifs.clearAll() }
-                    }
-                }
-                Text { visible: Services.Notifs.unread === 0; text: "Nothing new. Notifications you receive collect here."; color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                Repeater {
-                    model: Services.Notifs.history.slice(0, 6)
-                    NotificationCard { required property var modelData; notification: modelData; Layout.fillWidth: true; compact: true }
+                    Text { text: qs.batteryState(); color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13; Layout.fillWidth: true }
+                    Text { text: qs.batteryTime(); color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13 }
                 }
             }
         }

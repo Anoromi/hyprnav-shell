@@ -10,7 +10,9 @@ PanelWindow {
     required property var modelData
     screen: modelData
     property bool suppressed: false
-    visible: Services.Notifs.popups.length > 0 && !suppressed
+    // Only one screen shows popups: the focused one (see shell.qml).
+    property bool primary: true
+    visible: primary && Services.Notifs.popups.length > 0 && !suppressed
     anchors { top: true; right: true }
     margins { top: 12; right: 12 }
     implicitWidth: 380

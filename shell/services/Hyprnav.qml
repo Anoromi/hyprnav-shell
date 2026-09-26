@@ -292,6 +292,21 @@ Singleton {
         return null;
     }
 
+    // The cell showing a given physical workspace, for a bar on a screen that
+    // is not focused: the focused one when that workspace is focused, else
+    // its own (not inherited) frame, else any frame that shows it.
+    function cellForWorkspace(ws) {
+        if (!grid || ws === null || ws === undefined) return null;
+        let own = null, any = null;
+        for (const c of grid.items) {
+            if (c.physical_workspace_id !== ws) continue;
+            if (c.active) return c;
+            if (!c.inherited && !own) own = c;
+            if (!any) any = c;
+        }
+        return own ?? any;
+    }
+
     // Refresh after compositor changes, debounced.
     Timer { id: refreshDebounce; interval: 80; onTriggered: root.refreshAll() }
     Connections {
