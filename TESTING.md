@@ -160,3 +160,75 @@ never the last one; the equivalent guarantee, that the grid opens already
 scrolled to the current frame, was checked instead.
 
 Recording: `recordings/grid-scroll.mp4` (`scripts/grid-scroll-demo.sh`), 38 s.
+
+## The bar as the daily bar, phase 1 (2026-09-26)
+
+Plan: `BAR-ROLLOUT-PLAN.md`, phase 1. Lab: `scripts/lab.py up`, then
+`scripts/lab.py audio` (new: a private PipeWire and WirePlumber with no ALSA,
+Bluetooth or camera monitors and one null sink, "Lab speakers", so
+`wpctl set-volume` never moves the host's volume or DMS's OSD on the live
+output), and the shell started with `HNS_BACKLIGHT=/tmp/hns-bl`, a fake panel:
+
+```sh
+mkdir -p /tmp/hns-bl && echo 120 > /tmp/hns-bl/max_brightness && echo 60 > /tmp/hns-bl/brightness
+HNS_BACKLIGHT=/tmp/hns-bl scripts/run.sh start
+```
+
+hyprsunset is not installed on the host; the lab got it from the flake's
+nixpkgs (`nix build --inputs-from . nixpkgs#hyprsunset -o /tmp/hns-hyprsunset`,
+prepended to `PATH` in `lab/env.json`). A lab vicinae ran with
+`XDG_DATA_HOME=lab/data` so its clipboard history was the lab's own. Pointer
+clicks come from `hns-lab-scroll --click left|right|middle` (new).
+
+| Check | How | Result |
+|---|---|---|
+| Popup and centre entry | `lab.py exec notify-send` x7 across three apps, one critical | 7 popups; after 5 s only the critical one stays; `ipc call center state` lists Calendar 1, Build 5, Mail 1 |
+| Centre | bell click, screenshot | groups newest first, three cards per group plus "Show 2 more", per-group Clear, Clear all, DND row; opening marks all seen (bell count gone) |
+| Do not disturb | tile click in quick settings, then two notify-sends | normal one: 0 popups, 1 centre entry; critical one: popup shown |
+| Tray | `scripts/tray-test.py` (own icon pixmap, dbusmenu) | icon in the bar; left click → `Activate`, middle → `SecondaryActivate`, wheel → `Scroll -120 vertical` and the NeedsAttention dot; right click → menu sheet; "Keep it checked" toggles its check, "Say hello" sends a notification that lands in popups and centre |
+| Tray re-registration | shell restart | the item re-registers with the new watcher (the test script watches the name) |
+| Volume OSD | `wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.45`, `set-mute 1` | pill beside the bar with 45, then muted glyph and "off"; hides after 1.5 s |
+| Brightness OSD | `echo 90 > /tmp/hns-bl/brightness` | pill with the brightness glyph and 75 |
+| Night light | tile click | `hyprsunset -t 4000` runs, `hyprctl hyprsunset temperature` answers 4000; click again stops it; one found running after a shell restart is shown as on and stopped with `pkill -x hyprsunset` |
+| Power profile | click Saver, then Balanced | `powerprofilesctl get` on the host follows (power-saver, balanced); restored to balanced at once |
+| Launcher | bar button | vicinae's root search opens |
+| Clipboard | two `wl-copy` in the lab, bar button | vicinae's clipboard history with both entries |
+| Multi-monitor | `hyprctl output create headless TEST2`, shell with `HNS_SCREEN` empty | a bar on each output; each shows the frame of its own screen's workspace (1 and 3); popups and OSD only on the focused screen and they follow `focusedmon`; `ipc call qs open` opens on the focused screen |
+| Battery, Wi-Fi, Bluetooth glyphs | read-only, host UPower/NetworkManager/BlueZ | battery 92–97 % with the charging and full glyphs; "Plugged in, full" in the sheet; Wi-Fi SSID and connected marker; Bluetooth adapter on, 0 connected |
+| Logind brightness path | `busctl call … SetBrightness ssu backlight amdgpu_bl1 <current value>` on the host | exit 0 without root, value unchanged; an inotify watch on the sysfs file saw the write |
+
+Idle cost. The shell ran under `strace -f -tt -e trace=execve` with every
+component, the tray test item and the lab vicinae, 15 s to settle, then 70 s
+untouched: 0 `execve` in the window. Over the whole run the shell executed
+nine processes, all at start: `qs`, the three `sh` one-shots (backlight and
+brightnessctl, night-light tool, hyprnav socket) and their `head`, `ls`,
+`pgrep`. No `hyprctl`, `nmcli`, `bluetoothctl`, `wpctl` or `brightnessctl`
+at any time. CPU over 20 s idle, `/proc` jiffies: 0 with
+`switcher,grid,badges,caption`, 0.08–0.09 s with the bar. The bar's share
+follows D-Bus signals: the host's UPower sent about 3 `PropertiesChanged` a
+second during the run (battery and AC line, with udevd unit changes at the
+same time), each one re-evaluating the battery glyph.
+
+Findings fixed on the way:
+
+1. Tray clicks never reached the items: the system cluster's `MouseArea`
+   covered the tray column. The tray is now its own group, and its menu
+   opened at (0, 0); it now opens beside the item as a sheet.
+2. Popups and the OSD showed on every screen; they now follow the focused one.
+3. Every bar showed the focused screen's frame; each now shows its own.
+4. Plain JS records stored in a `list<var>` or passed as a `var` property are
+   copied, so identity comparisons failed and popups never expired.
+   Notification records are matched by a key.
+5. A click aimed at a quick-settings tile landed on a Wi-Fi row once the scan
+   list grew the sheet and opened the password prompt for an unknown network
+   (dismissed, nothing connected, `nmcli` showed the same connection). Clicks
+   in tests and the demo now open the sound section first; the Wi-Fi view is
+   only shown through IPC.
+
+Not verified in the lab: a real battery discharging to the low-battery warn
+colour, Wi-Fi or Bluetooth connection changes (not attempted, by rule),
+wlsunset (not installed; the command line is untested), brightness keys that
+the firmware handles without a userspace write (inotify would not see them),
+area screenshots (slurp needs a drag), and a tray app with submenus.
+
+Recording: `recordings/hyprnav-bar.mp4` (`scripts/bar-demo.sh`), 65 s.

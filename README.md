@@ -28,14 +28,38 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
   the end of the roll of the environment that owns it, and nowhere else: a
   child roll inherits its ancestors' numbered frames but not their temporary
   ones.
-- **Bar**: a 44 px column on the left edge. Current frame number on top, the
+- **Bar**: a 44 px column on the left edge of every screen. Current frame
+  number on top (each screen's bar follows the workspace on that screen), the
   rest of the roll as clickable digits below it, the environment title running
-  along the edge, then tray, notifications, Wi-Fi, Bluetooth, sound, battery,
-  and a stacked clock at the bottom.
-- **Quick settings**: one sheet with Wi-Fi (scan, connect, password prompt),
-  Bluetooth (power, connect, search), sound (volume, output picker),
-  brightness, battery, and notification history.
-- **Notifications**: popups top right, kept in history.
+  along the edge. At the bottom: launcher and clipboard buttons (vicinae),
+  the tray, the notification bell, the Wi-Fi/Bluetooth/sound/battery cluster
+  that opens quick settings, and a stacked clock. Hovering a button shows its
+  label beside the bar.
+- **Tray**: left click activates (or opens the menu of a menu-only item),
+  right click opens the item's menu drawn as a sheet beside the bar (check and
+  radio states, submenus with a back row), middle click is the secondary
+  action, the wheel scrolls the item. A Pencil dot marks NeedsAttention.
+- **Quick settings**: one sheet with quick tiles (night light, do not disturb,
+  area and screen screenshots), the power profile (power-profiles-daemon over
+  D-Bus), then Wi-Fi (scan, connect, password prompt), Bluetooth (power,
+  connect, search), sound (volume, output picker), brightness and battery.
+  Night light runs `hyprsunset -t 4000`, or `wlsunset` where hyprsunset is
+  missing; one it finds already running is stopped by exact name.
+  Screenshots go to `~/Pictures/Screenshots` and the clipboard (grim, slurp,
+  wl-copy).
+- **Notifications**: popups top right on the focused screen. The bell opens
+  the notification centre: this session's notifications in memory, grouped by
+  app (three per group, "show more"), clear per group or all, and do not
+  disturb, which holds popups back but still fills the centre; critical
+  notifications still pop. The server only runs when `popups` or `center` is
+  enabled, so a bar beside DMS never takes `org.freedesktop.Notifications`.
+- **OSD**: a pill beside the bar for 1.5 s after the default sink's volume or
+  mute changes (PipeWire events) or the backlight changes (inotify on the
+  sysfs `brightness` file), on the focused screen.
+- **Launcher and clipboard**: `vicinae toggle` and
+  `vicinae cmd launch clipboard:history`. vicinae keeps its own clipboard
+  history, so no cliphist is needed; bind the same commands in Hyprland for
+  the keyboard.
 
 ## Run
 
@@ -50,17 +74,33 @@ provides Quickshell 0.3.1 or newer. The flake exports `packages.<system>.quicksh
 from the same pin so DMS and this package can use one Quickshell build.
 
 `HNS_COMPONENTS` is a comma-separated list of `switcher`, `grid`, `badges`,
-`caption`, `bar`, `quick-settings`, and `notifications`. An unset value in a
-direct `qs -p shell` run enables all components for the lab. Set it explicitly
-to select surfaces; the live launcher leaves an explicit value alone.
+`caption`, `bar`, `qs` (quick settings), `popups` (notification popups and
+the server), `center` (notification centre), and `osd`. The older names
+`quick-settings` (= `qs`) and `notifications` (= `popups,center`) still work.
+An unset value in a direct `qs -p shell` run enables all components for the
+lab. Set it explicitly to select surfaces; the live launcher leaves an
+explicit value alone. For the shadow week beside DMS, `bar,qs` gives the bar
+and control centre without touching DMS's notifications or OSD.
+
+Nothing in the bar polls. Network, Bluetooth, battery, power profile and tray
+follow D-Bus signals through Quickshell's services, volume follows PipeWire,
+brightness an inotify watch. One-shot processes run at start (find the
+backlight and brightnessctl, find hyprsunset or wlsunset and whether it
+runs, find the hyprnav socket) and when quick settings open (the night light
+probe). Brightness writes go through brightnessctl if installed, otherwise
+logind's `SetBrightness` (no udev rule needed), otherwise sysfs.
 
 ```sh
 nix-build lab-tools -o lab-tools/result   # once: cage, virtual seat, wtype, wf-recorder
 scripts/lab.py up            # disposable Cage + nested Hyprland + hyprnav daemon
+scripts/lab.py audio         # optional: private PipeWire with one null sink
 scripts/run.sh start         # shell on the lab's TEST output
 scripts/run.sh ipc call switcher open
 scripts/run.sh ipc call grid toggle
 scripts/run.sh ipc call qs toggle
+scripts/run.sh ipc call qs section sound   # wifi | bluetooth | sound
+scripts/run.sh ipc call center toggle      # notification centre; also clear, dnd true|false, state
+scripts/run.sh ipc call osd show volume    # volume | brightness; osd state
 scripts/run.sh ipc call caption display "text" 5000   # large caption for recordings
 scripts/demo.sh              # scripted walkthrough, recorded to recordings/
 scripts/lab.py down
@@ -83,16 +123,18 @@ shell/
   Theme.qml            palette, type, spacing, motion tokens, fonts
   WorkspaceThumb.qml   live miniature of a workspace
   Glyph.qml            Nerd Font icon text
-  services/            Hyprnav (daemon socket client), Audio, Brightness, Notifs
+  Osd.qml              volume and brightness pill
+  services/            Hyprnav (daemon socket client), Audio, Brightness, Notifs, NightLight
   switcher/  grid/  bar/  notifications/
   fonts/               Recursive (OFL), see LICENSE-Recursive.txt
 scripts/               lab.py, seed.sh, run.sh, record.sh, demo.sh, headless.sh,
                        grid-wrap-demo.sh, grid-scroll-demo.sh (grid layout clips),
                        sticking-test.sh, sticking-demo.sh (hyprnav hard-sticking checks),
-                       agent-demo + agent-demo-app.py (GTK4 demo agent: countdown, then an approval dialog)
+                       agent-demo + agent-demo-app.py (GTK4 demo agent: countdown, then an approval dialog),
+                       tray-test.py (a StatusNotifierItem with a menu), bar-demo.sh (bar clip)
 lab-tools/             nix expression for the lab compositor tools (self-contained):
-                       cage, the virtual seat, hns-lab-scroll (pointer and wheel
-                       injection), wtype, wf-recorder
+                       cage, the virtual seat, hns-lab-scroll (pointer moves,
+                       clicks and wheel injection), wtype, wf-recorder
 design/                direction and notes
 recordings/            mp4 output
 ```
