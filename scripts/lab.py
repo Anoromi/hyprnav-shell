@@ -96,6 +96,19 @@ hl.config({{
 -- The live session's fade speed, so layer surfaces that map and unmap get
 -- the same compositor fade here as there.
 hl.animation({{ leaf = "fade", enabled = true, speed = 7, bezier = "default" }})
+-- The shell's keys, as in the live session (see scripts/bindings.example.lua).
+hl.bind("SUPER + Tab", hl.dsp.global("hyprnav-shell:switcher-open"))
+hl.bind("ALT + SHIFT + Tab", hl.dsp.global("hyprnav-shell:switcher-back"))
+hl.bind("SUPER + A", hl.dsp.global("hyprnav-shell:grid-toggle"))
+for _, key in ipairs({{ "Super_L", "Super_R" }}) do
+    hl.bind(key, hl.dsp.global("hyprnav-shell:switcher-commit"), {{ release = true, non_consuming = true, transparent = true }})
+    hl.bind("SUPER + " .. key, hl.dsp.global("hyprnav-shell:switcher-commit"), {{ release = true, non_consuming = true, transparent = true }})
+end
+hl.layer_rule({{
+    name = "hyprnav-shell-no-animation",
+    match = {{ namespace = "^hyprnav-shell-.*$" }},
+    no_anim = true,
+}})
 hl.window_rule({{
     name = "approval-floats",
     match = {{ title = "^Approval needed$" }},

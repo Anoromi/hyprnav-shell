@@ -111,6 +111,37 @@ ShellRoot {
         model: root.hasComponent("badges") ? root.screens : []
         AgentBadges {}
     }
+    // Keys, straight from the compositor (hyprland-global-shortcuts): no
+    // process spawn between the key and the shell. Hyprland binds them with
+    // hl.dsp.global("hyprnav-shell:<name>"); see scripts/bindings.example.lua.
+    // The IPC targets below stay for scripts.
+    readonly property bool perfOn: Quickshell.env("HNS_PERF") === "1"
+    function perf(what) { if (perfOn) console.info("[perf] " + what + " at " + Date.now()); }
+    GlobalShortcut {
+        appid: "hyprnav-shell"; name: "switcher-open"
+        description: "Open the workspace switcher, or step to the next frame"
+        onPressed: { root.perf("shortcut switcher-open"); root.switcherWin()?.show(false, true); }
+    }
+    GlobalShortcut {
+        appid: "hyprnav-shell"; name: "switcher-back"
+        description: "Open the workspace switcher backwards, or step back"
+        onPressed: root.switcherWin()?.show(true, false)
+    }
+    // Bound to the release of the switcher's modifier (Super). Hyprland sends
+    // a global bind's press and its release; only the release commits, and a
+    // commit with the switcher closed does nothing.
+    GlobalShortcut {
+        appid: "hyprnav-shell"; name: "switcher-commit"
+        description: "Activate the switcher's selection (bind to the modifier release)"
+        onPressed: root.perf("shortcut switcher-commit pressed")
+        onReleased: { root.perf("shortcut switcher-commit released"); root.switcherWin()?.commit(); }
+    }
+    GlobalShortcut {
+        appid: "hyprnav-shell"; name: "grid-toggle"
+        description: "Open or close the environment grid"
+        onPressed: { root.perf("shortcut grid-toggle"); root.gridWin()?.toggle(); }
+    }
+
     IpcHandler {
         target: "caption"
         function display(text: string, ms: int): void { captions.instances[0]?.show(text, ms); }
@@ -156,8 +187,8 @@ ShellRoot {
     }
     IpcHandler {
         target: "grid"
-        function open(): void { root.gridWin()?.show(); }
-        function toggle(): void { root.gridWin()?.toggle(); }
+        function open(): void { root.perf("ipc grid.open"); root.gridWin()?.show(); }
+        function toggle(): void { root.perf("ipc grid.toggle"); root.gridWin()?.toggle(); }
         function close(): void { root.gridWin()?.close(); }
         function activate(): void { root.gridWin()?.activate(); }
         function lock(): void { root.gridWin()?.toggleLock(); }
@@ -177,11 +208,15 @@ ShellRoot {
     }
     IpcHandler {
         target: "switcher"
-        function open(): void { root.switcherWin()?.show(false); }
-        function back(): void { root.switcherWin()?.show(true); }
+        function open(): void { root.perf("ipc switcher.open"); root.switcherWin()?.show(false, false); }
+        function back(): void { root.switcherWin()?.show(true, false); }
+        // Like open, but a later commit (the Super release) activates.
+        function hold(): void { root.switcherWin()?.show(false, true); }
+        function commit(): void { root.switcherWin()?.commit(); }
         function step(): void { root.switcherWin()?.step(1); }
         function stepBack(): void { root.switcherWin()?.step(-1); }
         function activate(): void { root.switcherWin()?.activate(); }
         function cancel(): void { root.switcherWin()?.cancel(); }
+        function state(): string { const w = root.switcherWin(); return w ? JSON.stringify({ phase: w.phase, selected: w.selected, hold: w.hold, items: w.items.map(it => it.workspace_id) }) : "none"; }
     }
 }

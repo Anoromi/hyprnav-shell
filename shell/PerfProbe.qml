@@ -62,7 +62,7 @@ Item {
             const t = probe.now();
             if (probe.waiting) {
                 probe.waiting = false;
-                console.info("[perf] " + probe.label + " " + probe.tag + ": first frame " + (t - probe.t0) + " ms, gui stall " + probe.worstStall + " ms");
+                console.info("[perf] " + probe.label + " " + probe.tag + ": first frame " + (t - probe.t0) + " ms at " + t + ", gui stall " + probe.worstStall + " ms");
             }
             if (probe.trackTag !== "") {
                 if (probe.lastSwap > 0) probe.gaps.push(t - probe.lastSwap);

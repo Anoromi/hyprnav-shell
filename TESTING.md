@@ -334,3 +334,82 @@ Theme tokens: `tHover` 120, `tOpen` 180, `tClose` 110, `tStaggerList` 22,
 
 Recording: `recordings/hyprnav-bar-polish.mp4` (`scripts/bar-polish-demo.sh`
 plus a 10 s half-speed before/after), 62 s.
+
+## Switcher and grid speed, hold-to-switch (2026-09-26)
+
+The user asked for a switcher and grid that open at once and for Super+Tab to
+switch when Super is released. Lab: `scripts/lab.py up`, output at
+1920x1080@120 for the timing runs, live `fade` speed 7. Keys come from the new
+`hns-lab-keys` (`lab-tools/keys.c`): one virtual keyboard with the US keymap,
+real keycodes and modifier state, printing the epoch time of each event.
+`wtype` could not be used: none of its keys triggered any compositor bind.
+`HNS_PERF=1` logs the shortcut or IPC arrival, `show()`, the snapshot
+arrival, the first swapped frame and the moment the content reaches full
+opacity, all as epoch ms. The before build is `a391999` with the same probe
+lines plus a probe global shortcut bound next to the old `exec_cmd` bind, so
+its log carries the compositor's key time. On-screen timing comes from 120 fps
+recordings (per-frame mean luma of a strip of the scrim).
+
+| Stage | Before (`a391999`, 6–10 runs) | After |
+|---|---|---|
+| (a) key → bind's process running (`exec_cmd`, bash wrapper) | 4–8 ms | none: global shortcut, 0–3 ms key → shell |
+| (b) `qs ipc` client start + IPC delivery | 21–33 ms (key → IPC 26–75 ms) | none |
+| daemon MRU snapshot (`ui_snapshot_switcher`) awaited before open | 60–233 ms (55–75 ms idle, straight on the socket) | not awaited: opens from a warm snapshot |
+| grid snapshot awaited | 36–68 ms | not awaited |
+| (c) new window → first frame | 20–108 ms switcher, 24–42 ms grid | 8–11 ms key → first frame (surface kept mapped) |
+| (d) Hyprland layer fade on the new surface | 217 ms to 90 %, 342 ms to 98 % (reduced motion, so ours off) | none (never re-mapped) |
+| (e) our motion | scrim 120 ms, cards 160 ms rise + 6 px y, ring OutBack scale, spring slide (hidden under (d)) | one 30 ms fade; ring slide 30 ms |
+| key → first frame, switcher | 108–416 ms | 8–16 ms |
+| **key → fully visible, switcher** (first frame + fade to 98 %) | **~460–770 ms** (90 %: ~320–630 ms) | **41–49 ms** (full-opacity stamp); recording: first change → 98 % in 33–42 ms |
+| key → first frame, grid | 89–169 ms | 2–13 ms |
+| **key → fully visible, grid** | **~440–520 ms** | **34–44 ms**; thumbnails fill in over the next frames |
+| close | 67 ms + unmap | 33 ms |
+
+Why the daemon is slow is the daemon's business (`build_switcher_snapshot`
+resolves every card); the shell keeps `Services.Hyprnav.switcher` fresh on
+the same debounced compositor events that already refresh the grid (no
+timer), opens from it, and when the fresh snapshot for this open arrives it
+moves the ring only if the user has not stepped yet.
+
+Behaviour, `/tmp`-scripted with `hns-lab-keys`:
+
+| Check | Result |
+|---|---|
+| Super+Tab, release | switches to the previous MRU workspace, 8/8 runs, window focused |
+| Super+Tab, Tab, Tab, release | third MRU entry |
+| Super+Tab, Tab, Shift+Tab, release | back to the second |
+| Super+Tab released 10 ms after Tab | still switches (a commit before the first snapshot is kept and applied) |
+| Super+Tab, Esc, release | nothing switches |
+| bare Super tap, switcher closed | nothing |
+| Super+Tab, Return while held | switches once; the release after it is a no-op |
+| Tab release while Super held | does not commit (only the Super release does) |
+| Super+A, Super+A | grid opens, closes |
+| Super+A, Right, Return | switches, window focused |
+| both key/modifier event orders (key then modifiers, as Hyprland's `bindr = SUPER, SUPER_L` handling expects, and the reverse) | one commit each |
+
+Findings on the way:
+
+1. **Release binds on a modifier are shadowed** once another bind fires while
+   it is held: `hl.bind("Super_L", …, { release = true })` fired for a bare
+   Super tap but never after Super+Tab. `transparent = true` keeps it. Bound
+   with and without `SUPER +` so either modifier state at release matches.
+2. **Global binds from Lua**: `hl.dsp.global("appid:name")`. A release bind
+   delivers the shortcut's `released` signal, which is what `switcher-commit`
+   acts on; `pressed` from a press bind drives open/step/grid.
+3. **Focus hand-back undid the switch** about half the time once the surface
+   stayed mapped: when Hyprland processes the layer's keyboard release after
+   the workspace switch, it refocuses the window that had focus before, on the
+   old workspace. `FocusRelease.qml` now sends the goto only after the frame
+   that commits the release (8/8 correct afterwards; holding focus until the
+   daemon answered failed 6/6).
+4. **Layer rules must match the whole namespace**: `^hyprnav-shell-` matched
+   nothing; `^hyprnav-shell-.*$` removes the fade (the old build's switcher
+   then reached full opacity on its first visible frame). Kept for the
+   surfaces that still map and unmap: captions, agent badges, popups.
+
+Not measurable here: the compositor's cost of two more always-mapped
+full-screen transparent overlays (the nested Hyprland spins at 100 % of a core
+in the lab regardless). The shell itself stays at 0 jiffies over 10 s idle;
+the hidden overlays draw nothing and their thumbnails capture nothing.
+
+Recording: `recordings/fast-switcher.mp4` (`scripts/fast-switcher-demo.sh`), 27 s.

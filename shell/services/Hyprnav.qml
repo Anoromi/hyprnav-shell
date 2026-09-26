@@ -116,6 +116,7 @@ Singleton {
         connected = true;
         eventsSocketPath = socketPath.replace(/hyprnav\.sock$/, "events.sock");
         refreshAll();
+        if (keepSwitcherWarm) refreshSwitcher(false);
     }
 
     // Event stream. Unlike the request socket this one is multi-client and
@@ -167,9 +168,16 @@ Singleton {
     function refreshGrid(cb) {
         request("ui_snapshot_grid", { cwd: null }, (res, err) => { if (res) { grid = res; gridUpdated(); } if (cb) cb(res, err); });
     }
+    // `_reverse` records the direction the daemon's `initial_index` was
+    // chosen for, so a cached snapshot is only trusted for that direction.
     function refreshSwitcher(reverse, cb) {
-        request("ui_snapshot_switcher", { reverse: !!reverse }, (res, err) => { if (res) { switcher = res; switcherUpdated(); } if (cb) cb(res, err); });
+        request("ui_snapshot_switcher", { reverse: !!reverse }, (res, err) => { if (res) { res._reverse = !!reverse; switcher = res; switcherUpdated(); } if (cb) cb(res, err); });
     }
+    // Set by the switcher: keep an MRU snapshot ready so Super+Tab can open
+    // from it at once instead of waiting 50-120 ms for the daemon to build one.
+    // It is re-read on the same compositor events as the grid, never on a timer.
+    property bool keepSwitcherWarm: false
+    onKeepSwitcherWarmChanged: if (keepSwitcherWarm && connected) refreshSwitcher(false)
     function refreshStatus() { request("status_get", { cwd: null }, res => { if (res) status = res; }); }
     function gotoSlot(env, slot, cb) { request("workspace_goto", { env: env, slot: slot }, (r, e) => { refreshDebounce.restart(); if (cb) cb(r, e); }); }
     function gotoPhysical(ws, cb) { request("workspace_goto_physical", { workspace_id: ws }, (r, e) => { refreshDebounce.restart(); if (cb) cb(r, e); }); }
@@ -308,7 +316,7 @@ Singleton {
     }
 
     // Refresh after compositor changes, debounced.
-    Timer { id: refreshDebounce; interval: 80; onTriggered: root.refreshAll() }
+    Timer { id: refreshDebounce; interval: 80; onTriggered: { root.refreshAll(); if (root.keepSwitcherWarm) root.refreshSwitcher(false); } }
     Connections {
         target: Hyprland
         function onRawEvent(ev) {

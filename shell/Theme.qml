@@ -64,6 +64,9 @@ Singleton {
     readonly property int tScrim: reducedMotion ? 0 : 120
     readonly property int tRise: reducedMotion ? 0 : 160
     readonly property int tStagger: reducedMotion ? 0 : 12
+    // Switcher and grid: they sit on the path from a key press to the next
+    // window, so they appear and leave in one short fade and nothing travels.
+    readonly property int tSnap: reducedMotion ? 0 : 30
     // Bar and sheets: hover and press states, sheets rising from the bar edge
     // (open slower than close, so a dismissal never feels sticky).
     readonly property int tHover: reducedMotion ? 0 : 120
