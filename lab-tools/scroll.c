@@ -1,9 +1,11 @@
-// Pointer input for the lab: move the virtual pointer and send wheel or
-// touchpad scroll. The seat helper only keeps the devices alive; this one
+// Pointer input for the lab: move the virtual pointer, click, and send wheel
+// or touchpad scroll. The seat helper only keeps the devices alive; this one
 // drives them.
 //
-//   hns-lab-scroll [--at X Y] [--finger] [--delay MS] STEPS...
+//   hns-lab-scroll [--at X Y] [--click left|right|middle] [--finger] [--delay MS] STEPS...
 //
+// --click presses and releases the button once, after the move and before
+// any scroll steps.
 // Each STEP is a signed number: wheel clicks by default (positive scrolls
 // down), pixels with --finger. Without --at the pointer is left where it is.
 #define _GNU_SOURCE
@@ -33,6 +35,7 @@ static uint32_t now_ms(void) {
 
 int main(int argc, char **argv) {
     int finger = 0, have_at = 0, delay_ms = 40;
+    uint32_t click = 0;
     uint32_t at_x = 0, at_y = 0, ex = 1920, ey = 1080;
     double steps[256];
     int nsteps = 0;
@@ -41,6 +44,10 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--at") && i + 2 < argc) { have_at = 1; at_x = atoi(argv[++i]); at_y = atoi(argv[++i]); }
         else if (!strcmp(argv[i], "--extent") && i + 2 < argc) { ex = atoi(argv[++i]); ey = atoi(argv[++i]); }
         else if (!strcmp(argv[i], "--delay") && i + 1 < argc) delay_ms = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--click") && i + 1 < argc) {
+            const char *b = argv[++i];
+            click = !strcmp(b, "right") ? 0x111 : !strcmp(b, "middle") ? 0x112 : 0x110;   // BTN_*
+        }
         else if (nsteps < 256) steps[nsteps++] = atof(argv[i]);
     }
     struct wl_display *d = wl_display_connect(NULL);
@@ -56,6 +63,16 @@ int main(int argc, char **argv) {
         zwlr_virtual_pointer_v1_frame(p);
         wl_display_roundtrip(d);
         usleep(60000);
+    }
+    if (click) {
+        zwlr_virtual_pointer_v1_button(p, now_ms(), click, WL_POINTER_BUTTON_STATE_PRESSED);
+        zwlr_virtual_pointer_v1_frame(p);
+        wl_display_roundtrip(d);
+        usleep(40000);
+        zwlr_virtual_pointer_v1_button(p, now_ms(), click, WL_POINTER_BUTTON_STATE_RELEASED);
+        zwlr_virtual_pointer_v1_frame(p);
+        wl_display_roundtrip(d);
+        usleep(40000);
     }
     for (int i = 0; i < nsteps; i++) {
         uint32_t t = now_ms();

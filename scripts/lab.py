@@ -9,6 +9,8 @@ and state, so nothing touches the live desktop. Commands:
   lab.py down      stop everything
   lab.py env       print `export` lines for the nested session
   lab.py exec CMD  run CMD inside the nested session
+  lab.py audio     start a private PipeWire + WirePlumber with one null sink
+                   inside the lab, so volume checks never touch the host
 """
 import json, os, shlex, signal, subprocess, sys, tempfile, time
 from pathlib import Path
@@ -158,6 +160,54 @@ hl.window_rule({{
     print(json.dumps({"runtime": str(runtime), "instance": env["HYPRLAND_INSTANCE_SIGNATURE"], "pids": procs}, indent=2))
     print(hc("monitors"))
 
+def audio():
+    """Private PipeWire for the lab: no ALSA, Bluetooth or camera monitors, one
+    null sink named "Lab speakers". Rewrites env.json so later lab commands and
+    the shell talk to it instead of the host's PipeWire."""
+    env = load_env()
+    runtime = env["XDG_RUNTIME_DIR"]
+    procs = json.loads(PIDS.read_text())
+    if "pipewire" in procs:
+        try:
+            os.kill(procs["pipewire"], 0); print("lab audio already running"); return
+        except ProcessLookupError:
+            pass
+    cfg = LAB / "config"
+    (cfg / "pipewire/pipewire.conf.d").mkdir(parents=True, exist_ok=True)
+    (cfg / "pipewire/pipewire.conf.d/lab-sink.conf").write_text("""context.objects = [
+  { factory = adapter
+    args = {
+      factory.name = support.null-audio-sink
+      node.name = "lab-speakers"
+      node.description = "Lab speakers"
+      media.class = Audio/Sink
+      audio.position = [ FL FR ]
+      monitor.channel-volumes = true
+    }
+  }
+]
+""")
+    (cfg / "wireplumber/wireplumber.conf.d").mkdir(parents=True, exist_ok=True)
+    (cfg / "wireplumber/wireplumber.conf.d/lab.conf").write_text("""wireplumber.profiles = {
+  main = {
+    monitor.alsa = disabled
+    monitor.alsa-midi = disabled
+    monitor.bluez = disabled
+    monitor.bluez.midi = disabled
+    monitor.v4l2 = disabled
+    monitor.libcamera = disabled
+  }
+}
+""")
+    env["PIPEWIRE_RUNTIME_DIR"] = runtime
+    env["PULSE_RUNTIME_PATH"] = runtime + "/pulse"
+    pw = launch("pipewire", ["pipewire"], env, procs)
+    wait(lambda: Path(runtime, "pipewire-0").exists(), pw, "pipewire")
+    launch("wireplumber", ["wireplumber"], env, procs)
+    ENVF.write_text(json.dumps(env, indent=2)); os.chmod(ENVF, 0o600)
+    time.sleep(1.5)
+    print(subprocess.run(["wpctl", "status"], env=env, capture_output=True, text=True).stdout)
+
 def down():
     if not PIDS.exists():
         print("not running"); return
@@ -182,6 +232,7 @@ def main():
     elif cmd == "down": down()
     elif cmd == "env":
         for k, v in load_env().items(): print(f"export {k}={shlex.quote(v)}")
+    elif cmd == "audio": audio()
     elif cmd == "exec":
         os.execvpe(sys.argv[2], sys.argv[2:], load_env())
     else:
