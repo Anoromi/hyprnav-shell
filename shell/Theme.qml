@@ -58,6 +58,19 @@ Singleton {
     readonly property int rControl: 8
     readonly property int ringWidth: 3
 
+    // Lists in sheets (Wi-Fi, Bluetooth, outputs, notifications) live in boxes
+    // of a fixed height, so a sheet is the same size from its first frame
+    // however many rows a scan brings in. Rows scroll inside the box.
+    readonly property int rowH: 40               // Wi-Fi and Bluetooth rows
+    readonly property int rowCompactH: 34        // output (sink) rows
+    readonly property int listGap: 4
+    function listBox(rows, rowHeight) { return rows * rowHeight + (rows - 1) * listGap; }
+    readonly property int wifiListH: listBox(7, rowH)          // 304
+    readonly property int btListH: listBox(5, rowH)            // 216
+    readonly property int sinkListH: listBox(3, rowCompactH)   // 110
+    readonly property int centerListH: 560                     // about eight compact cards
+    readonly property int listFadeH: 32
+
     // Motion
     readonly property bool reducedMotion: Quickshell.env("HNS_REDUCED_MOTION") === "1"
     readonly property int tFast: reducedMotion ? 0 : 90

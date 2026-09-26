@@ -21,6 +21,13 @@ import ".."
 // strengths does not rebuild rows; the Wi-Fi scan starts only after the Wi-Fi
 // view has been open for a second, or from its Scan button, and the list
 // shows NetworkManager's cached results at once.
+//
+// Size: every list sits in a box of fixed height (ScrollList, heights from
+// Theme), so a view is the same height from its first frame however many
+// rows a scan brings in; the rows scroll inside the box. The connected
+// network and connected devices are pinned above their list. With
+// HNS_FAKE_WIFI / HNS_FAKE_BT (lab only) the radios are
+// services/FakeRadios.qml.
 SheetWindow {
     id: qs
     required property var modelData
@@ -34,36 +41,61 @@ SheetWindow {
     WlrLayershell.namespace: "hyprnav-shell-quicksettings"
 
     PerfProbe { id: perf; label: "qs" }
-    onOpened: { perf.arm("open " + section); bar.refresh(); Services.NightLight.probe(); }
+    onOpened: { perf.arm("open " + section); bar.refresh(); Services.NightLight.probe(); focusList(); }
+    onSectionChanged: if (shown) focusList()
+    // The visible list takes the keys (Up/Down/PageUp/PageDown/Home/End); Esc
+    // is not taken and reaches the sheet.
+    function focusList() {
+        Qt.callLater(() => {
+            const l = section === "wifi" ? wifiList : section === "bluetooth" ? btList : sinkList;
+            if (qs.pendingNetwork === null) l.view.forceActiveFocus();
+        });
+    }
     onDismissed: { if (bar.wifiDev) bar.wifiDev.scannerEnabled = false; pendingNetwork = null; }
 
     // Shared lookups. `networks` and `btDevices` are refreshed on a short
     // debounce while the sheet is open and assigned only when they differ.
     QtObject {
         id: bar
-        readonly property var wifiDev: Networking.devices.values.find(d => d.type === DeviceType.Wifi) ?? null
+        readonly property bool fakeWifi: Services.FakeRadios.wifi
+        readonly property bool fakeBt: Services.FakeRadios.bt
+        readonly property var wifiDev: fakeWifi ? Services.FakeRadios.wifiDev : (Networking.devices.values.find(d => d.type === DeviceType.Wifi) ?? null)
+        readonly property bool wifiOn: fakeWifi ? Services.FakeRadios.wifiEnabled : Networking.wifiEnabled
+        function toggleWifi() { if (fakeWifi) Services.FakeRadios.wifiEnabled = !Services.FakeRadios.wifiEnabled; else Networking.wifiEnabled = !Networking.wifiEnabled; }
         readonly property int netCount: wifiDev ? wifiDev.networks.values.length : 0
         readonly property var connectedNet: wifiDev ? (wifiDev.networks.values.find(n => n.connected) ?? null) : null
-        readonly property var btAdapter: Bluetooth.defaultAdapter
+        readonly property var btAdapter: fakeBt ? Services.FakeRadios.btAdapter : Bluetooth.defaultAdapter
         readonly property int btCount: btAdapter ? btAdapter.devices.values.length : 0
         readonly property int btConnected: btAdapter ? btAdapter.devices.values.filter(d => d.connected).length : 0
         readonly property var battery: UPower.displayDevice
+        // Pinned above the list (the connected network, up to two connected
+        // devices) and the scrolling rest. Assigned only when the set or order
+        // changes; the ScriptModels diff them, so kept rows keep their delegates.
+        property var pinnedNets: []
         property var networks: []
+        property var pinnedBt: []
         property var btDevices: []
         onNetCountChanged: if (qs.shown) debounce.restart()
         onBtCountChanged: if (qs.shown) debounce.restart()
+        onConnectedNetChanged: if (qs.shown) debounce.restart()
+        onBtConnectedChanged: if (qs.shown) debounce.restart()
+        onWifiOnChanged: refresh()
         function same(a, b) { return a.length === b.length && a.every((x, i) => x === b[i]); }
         function strength(n) { return Math.round(n.signalStrength * 4); }   // coarse, so small wobbles do not reorder
         function refresh() {
-            const nets = wifiDev ? wifiDev.networks.values.slice()
-                .sort((a, b) => (b.connected - a.connected) || (b.known - a.known) || (strength(b) - strength(a)) || String(a.name).localeCompare(String(b.name)))
-                .slice(0, 8) : [];
-            if (!same(nets, networks)) networks = nets;
-            const bts = btAdapter ? btAdapter.devices.values
+            const nets = wifiDev && wifiOn ? wifiDev.networks.values.slice()
+                .sort((a, b) => (b.known - a.known) || (strength(b) - strength(a)) || String(a.name).localeCompare(String(b.name)))
+                .slice(0, 60) : [];
+            const pn = nets.filter(n => n.connected), rn = nets.filter(n => !n.connected);
+            if (!same(pn, pinnedNets)) pinnedNets = pn;
+            if (!same(rn, networks)) networks = rn;
+            const bts = btAdapter && btAdapter.enabled ? btAdapter.devices.values
                 .filter(d => d.paired || d.connected || (d.name && d.name !== ""))
                 .sort((a, b) => (b.connected - a.connected) || (b.paired - a.paired) || String(a.name).localeCompare(String(b.name)))
-                .slice(0, 8) : [];
-            if (!same(bts, btDevices)) btDevices = bts;
+                .slice(0, 60) : [];
+            const pb = bts.filter(d => d.connected).slice(0, 2), rb = bts.filter(d => !pb.includes(d));
+            if (!same(pb, pinnedBt)) pinnedBt = pb;
+            if (!same(rb, btDevices)) btDevices = rb;
         }
     }
     Timer { id: debounce; interval: 250; onTriggered: bar.refresh() }
@@ -71,11 +103,13 @@ SheetWindow {
     Timer { interval: 2000; repeat: true; running: qs.shown && qs.section !== "sound"; onTriggered: bar.refresh() }
     // Scan only when someone is looking at the list.
     Timer {
+        id: scanWait
         interval: 1000
         running: qs.shown && qs.section === "wifi"
-        onTriggered: if (bar.wifiDev && Networking.wifiEnabled) bar.wifiDev.scannerEnabled = true
+        onTriggered: if (bar.wifiDev && bar.wifiOn) bar.wifiDev.scannerEnabled = true
     }
     property var pendingNetwork: null   // network awaiting a password
+    onPendingNetworkChanged: if (pendingNetwork !== null) Qt.callLater(() => pw.forceActiveFocus())
 
     function batteryState() {
         const b = bar.battery; if (!b) return "";
@@ -118,6 +152,47 @@ SheetWindow {
         color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs12
     }
     component Hairline: Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.emulsion }
+
+    // One network. Used for the pinned connected row and the list rows.
+    component NetRow: Pressable {
+        id: netRow
+        required property var modelData
+        width: ListView.view ? ListView.view.width : (parent ? parent.width : 0)
+        implicitHeight: Theme.rowH
+        Component.onCompleted: if (perf.enabled) console.info("[perf] qs wifi row created " + modelData.name)
+        RowLayout {
+            anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
+            spacing: Theme.s8
+            Glyph { text: netRow.modelData.signalStrength > 0.8 ? "󰤨" : netRow.modelData.signalStrength > 0.55 ? "󰤥" : netRow.modelData.signalStrength > 0.3 ? "󰤢" : "󰤟"; color: netRow.modelData.connected ? Theme.pencil : Theme.paper }
+            Text { text: netRow.modelData.name || "Hidden network"; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13; font.weight: netRow.modelData.connected ? Font.Medium : Font.Normal; Layout.fillWidth: true; elide: Text.ElideRight }
+            Glyph { visible: netRow.modelData.security !== WifiSecurityType.Open; text: "󰌾"; size: 12; color: Theme.fixer }
+            Meta { text: netRow.modelData.connected ? "connected" : (netRow.modelData.stateChanging ? "connecting" : (netRow.modelData.known ? "saved" : "")); color: netRow.modelData.connected ? Theme.good : Theme.fixer }
+        }
+        onClicked: {
+            const n = netRow.modelData;
+            if (n.connected) return;
+            if (n.known || n.security === WifiSecurityType.Open) n.connect();
+            else qs.pendingNetwork = n;
+        }
+    }
+
+    // One Bluetooth device, pinned or in the list.
+    component BtRow: Pressable {
+        id: btRow
+        required property var modelData
+        width: ListView.view ? ListView.view.width : (parent ? parent.width : 0)
+        implicitHeight: Theme.rowH
+        Component.onCompleted: if (perf.enabled) console.info("[perf] qs bt row created " + modelData.name)
+        RowLayout {
+            anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
+            spacing: Theme.s8
+            Glyph { text: btRow.modelData.connected ? "󰂱" : "󰂯"; color: btRow.modelData.connected ? Theme.pencil : Theme.paper }
+            Text { text: btRow.modelData.name || btRow.modelData.address; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13; Layout.fillWidth: true; elide: Text.ElideRight }
+            Text { visible: btRow.modelData.batteryAvailable; text: Math.round(btRow.modelData.battery * 100) + "%"; color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs12 }
+            Meta { text: btRow.modelData.connected ? "connected" : (btRow.modelData.state === BluetoothDeviceState.Connecting ? "connecting" : (btRow.modelData.paired ? "paired" : "")); color: btRow.modelData.connected ? Theme.good : Theme.fixer }
+        }
+        onClicked: { const d = btRow.modelData; if (d.connected) d.disconnect(); else d.connect(); }
+    }
 
     ColumnLayout {
         id: content
@@ -206,7 +281,7 @@ SheetWindow {
             spacing: Theme.s4
             Repeater {
                 model: [
-                    { id: "wifi", glyph: Networking.wifiEnabled ? "󰖩" : "󰖪", label: bar.connectedNet ? bar.connectedNet.name : (Networking.wifiEnabled ? "Wi-Fi" : "Wi-Fi off") },
+                    { id: "wifi", glyph: bar.wifiOn ? "󰖩" : "󰖪", label: bar.connectedNet ? bar.connectedNet.name : (bar.wifiOn ? "Wi-Fi" : "Wi-Fi off") },
                     { id: "bluetooth", glyph: bar.btConnected > 0 ? "󰂱" : "󰂯", label: bar.btAdapter && bar.btAdapter.enabled ? (bar.btConnected + " connected") : "Bluetooth off" },
                     { id: "sound", glyph: Services.Audio.icon(), label: Services.Audio.muted ? "Muted" : Math.round(Services.Audio.volume * 100) + "%" }
                 ]
@@ -231,108 +306,114 @@ SheetWindow {
 
         Hairline {}
 
-        // Wi-Fi
+        // Wi-Fi: a fixed box, the connected network pinned at its top.
         ColumnLayout {
             visible: qs.section === "wifi"
             Layout.fillWidth: true
             spacing: Theme.s4
             RowLayout {
                 Layout.fillWidth: true
+                Layout.preferredHeight: 28
                 spacing: Theme.s8
                 Heading { text: "Wi-Fi"; Layout.fillWidth: true }
                 Pressable {
-                    visible: bar.wifiDev !== null && Networking.wifiEnabled
+                    visible: bar.wifiDev !== null && bar.wifiOn
                     implicitWidth: scanLabel.implicitWidth + Theme.s16; implicitHeight: 24
                     interactive: bar.wifiDev !== null && !bar.wifiDev.scannerEnabled
                     Meta { id: scanLabel; anchors.centerIn: parent; text: bar.wifiDev && bar.wifiDev.scannerEnabled ? "Scanning" : "Scan"; color: parent.hovered ? Theme.paper : Theme.fixer }
                     onClicked: if (bar.wifiDev) bar.wifiDev.scannerEnabled = true
                 }
-                Toggle { on: Networking.wifiEnabled; onToggled: Networking.wifiEnabled = !Networking.wifiEnabled }
+                Toggle { visible: bar.wifiDev !== null; on: bar.wifiOn; onToggled: bar.toggleWifi() }
             }
-            Text { visible: !bar.wifiDev; text: "No Wi-Fi adapter found."; color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13 }
-            Repeater {
-                model: bar.networks
-                Pressable {
-                    id: netRow
-                    required property var modelData
-                    Layout.fillWidth: true
-                    implicitHeight: 40
-                    RowLayout {
-                        anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
-                        spacing: Theme.s8
-                        Glyph { text: netRow.modelData.signalStrength > 0.8 ? "󰤨" : netRow.modelData.signalStrength > 0.55 ? "󰤥" : netRow.modelData.signalStrength > 0.3 ? "󰤢" : "󰤟"; color: netRow.modelData.connected ? Theme.pencil : Theme.paper }
-                        Text { text: netRow.modelData.name || "Hidden network"; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13; font.weight: netRow.modelData.connected ? Font.Medium : Font.Normal; Layout.fillWidth: true; elide: Text.ElideRight }
-                        Glyph { visible: netRow.modelData.security !== WifiSecurityType.None; text: "󰌾"; size: 12; color: Theme.fixer }
-                        Meta { text: netRow.modelData.connected ? "connected" : (netRow.modelData.stateChanging ? "connecting" : (netRow.modelData.known ? "saved" : "")); color: netRow.modelData.connected ? Theme.good : Theme.fixer }
-                    }
-                    onClicked: {
-                        const n = netRow.modelData;
-                        if (n.connected) return;
-                        if (n.known || n.security === WifiSecurityType.None) n.connect();
-                        else qs.pendingNetwork = n;
-                    }
-                }
-            }
-            // Password prompt for a new secured network
-            Rectangle {
-                visible: qs.pendingNetwork !== null
+            Item {
                 Layout.fillWidth: true
-                implicitHeight: 76; radius: Theme.rControl
-                color: Theme.emulsion
+                Layout.preferredHeight: Theme.wifiListH
                 Column {
-                    anchors.fill: parent; anchors.margins: Theme.s8; spacing: Theme.s4
-                    Text { text: "Password for " + (qs.pendingNetwork ? qs.pendingNetwork.name : ""); color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13 }
-                    Rectangle {
-                        width: parent.width; height: 30; radius: 6; color: Theme.darkroom; border.color: pw.activeFocus ? Theme.pencil : Theme.emulsion
-                        TextInput {
-                            id: pw
-                            anchors.fill: parent; anchors.margins: 6
-                            color: Theme.paper; font.family: Theme.mono; font.pixelSize: Theme.fs13
-                            echoMode: TextInput.Password
-                            focus: qs.pendingNetwork !== null
-                            onAccepted: { if (qs.pendingNetwork) qs.pendingNetwork.connectWithPsk(text); text = ""; qs.pendingNetwork = null; }
-                            Keys.onEscapePressed: { text = ""; qs.pendingNetwork = null; }
+                    id: wifiPinned
+                    width: parent.width
+                    spacing: Theme.listGap
+                    Repeater { model: ScriptModel { values: bar.pinnedNets } delegate: NetRow {} }
+                }
+                ScrollList {
+                    id: wifiList
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: parent.height - (bar.pinnedNets.length > 0 ? wifiPinned.height + Theme.listGap : 0)
+                    bottomInset: qs.pendingNetwork !== null ? pwBox.height + Theme.s4 : 0
+                    model: ScriptModel { values: bar.networks }
+                    delegate: NetRow {}
+                    placeholder: !bar.wifiDev ? "No Wi-Fi adapter found."
+                        : !bar.wifiOn ? "Wi-Fi is off."
+                        : (bar.wifiDev.scannerEnabled || scanWait.running) ? "Scanning…"
+                        : bar.pinnedNets.length > 0 ? "No other networks in range." : "No networks in range."
+                }
+                // Password prompt for a new secured network, over the bottom of
+                // the box so the sheet keeps its height.
+                Rectangle {
+                    id: pwBox
+                    visible: qs.pendingNetwork !== null
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: 76; radius: Theme.rControl
+                    color: Theme.emulsion
+                    Column {
+                        anchors.fill: parent; anchors.margins: Theme.s8; spacing: Theme.s4
+                        Text { width: parent.width; elide: Text.ElideRight; text: "Password for " + (qs.pendingNetwork ? qs.pendingNetwork.name : ""); color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13 }
+                        Rectangle {
+                            width: parent.width; height: 30; radius: 6; color: Theme.darkroom; border.color: pw.activeFocus ? Theme.pencil : Theme.emulsion
+                            TextInput {
+                                id: pw
+                                anchors.fill: parent; anchors.margins: 6
+                                color: Theme.paper; font.family: Theme.mono; font.pixelSize: Theme.fs13
+                                echoMode: TextInput.Password
+                                focus: qs.pendingNetwork !== null
+                                onAccepted: { if (qs.pendingNetwork) qs.pendingNetwork.connectWithPsk(text); text = ""; qs.pendingNetwork = null; qs.focusList(); }
+                                Keys.onEscapePressed: { text = ""; qs.pendingNetwork = null; qs.focusList(); }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Bluetooth
+        // Bluetooth: a fixed box, connected devices pinned at its top.
         ColumnLayout {
             visible: qs.section === "bluetooth"
             Layout.fillWidth: true
             spacing: Theme.s4
             RowLayout {
                 Layout.fillWidth: true
+                Layout.preferredHeight: 28
                 spacing: Theme.s8
                 Heading { text: "Bluetooth"; Layout.fillWidth: true }
                 Meta { visible: bar.btAdapter !== null && bar.btAdapter.discovering; text: "Searching" }
-                Toggle { on: bar.btAdapter ? bar.btAdapter.enabled : false; onToggled: if (bar.btAdapter) bar.btAdapter.enabled = !bar.btAdapter.enabled }
+                Toggle { visible: bar.btAdapter !== null; on: bar.btAdapter ? bar.btAdapter.enabled : false; onToggled: if (bar.btAdapter) bar.btAdapter.enabled = !bar.btAdapter.enabled }
             }
-            Text { visible: !bar.btAdapter; text: "No Bluetooth adapter found."; color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13 }
-            Repeater {
-                model: bar.btDevices
-                Pressable {
-                    id: btRow
-                    required property var modelData
-                    Layout.fillWidth: true
-                    implicitHeight: 40
-                    RowLayout {
-                        anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
-                        spacing: Theme.s8
-                        Glyph { text: btRow.modelData.connected ? "󰂱" : "󰂯"; color: btRow.modelData.connected ? Theme.pencil : Theme.paper }
-                        Text { text: btRow.modelData.name || btRow.modelData.address; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13; Layout.fillWidth: true; elide: Text.ElideRight }
-                        Text { visible: btRow.modelData.batteryAvailable; text: Math.round(btRow.modelData.battery * 100) + "%"; color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs12 }
-                        Meta { text: btRow.modelData.connected ? "connected" : (btRow.modelData.state === BluetoothDeviceState.Connecting ? "connecting" : (btRow.modelData.paired ? "paired" : "")); color: btRow.modelData.connected ? Theme.good : Theme.fixer }
-                    }
-                    onClicked: { const d = btRow.modelData; if (d.connected) d.disconnect(); else d.connect(); }
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Theme.btListH
+                Column {
+                    id: btPinned
+                    width: parent.width
+                    spacing: Theme.listGap
+                    Repeater { model: ScriptModel { values: bar.pinnedBt } delegate: BtRow {} }
+                }
+                ScrollList {
+                    id: btList
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: parent.height - (bar.pinnedBt.length > 0 ? btPinned.height + Theme.listGap : 0)
+                    model: ScriptModel { values: bar.btDevices }
+                    delegate: BtRow {}
+                    placeholder: !bar.btAdapter ? "No Bluetooth adapter found."
+                        : !bar.btAdapter.enabled ? "Bluetooth is off."
+                        : bar.btAdapter.discovering ? "Searching…"
+                        : bar.pinnedBt.length > 0 ? "No other devices." : "No devices."
                 }
             }
             Pressable {
                 Layout.fillWidth: true; implicitHeight: 32
                 Layout.topMargin: Theme.s4
                 outlined: true
+                interactive: bar.btAdapter !== null && bar.btAdapter.enabled
+                opacity: interactive ? 1 : 0.5
                 Text { anchors.centerIn: parent; text: bar.btAdapter && bar.btAdapter.discovering ? "Stop searching" : "Search for devices"; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13 }
                 onClicked: if (bar.btAdapter) bar.btAdapter.discovering = !bar.btAdapter.discovering
             }
@@ -354,13 +435,19 @@ SheetWindow {
                 Slider { id: vol; Layout.fillWidth: true; value: Services.Audio.volume; onDraggingChanged: perf.track("volume drag", dragging); onMoved: v => Services.Audio.setVolume(v) }
                 ValueLabel { slider: vol }
             }
-            Repeater {
-                model: Services.Audio.sinks
-                Pressable {
+            // Outputs: a box of three rows, the rest scroll.
+            ScrollList {
+                id: sinkList
+                Layout.fillWidth: true
+                Layout.preferredHeight: Theme.sinkListH
+                step: Theme.rowCompactH + Theme.listGap
+                model: ScriptModel { values: Services.Audio.sinks }
+                placeholder: "No outputs."
+                delegate: Pressable {
                     id: sinkRow
                     required property var modelData
                     readonly property bool isDefault: Services.Audio.sink === modelData
-                    Layout.fillWidth: true; implicitHeight: 34
+                    width: ListView.view.width; implicitHeight: Theme.rowCompactH
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
                         Glyph { text: sinkRow.isDefault ? "󰄬" : " "; color: Theme.pencil; size: 13 }

@@ -413,3 +413,63 @@ in the lab regardless). The shell itself stays at 0 jiffies over 10 s idle;
 the hidden overlays draw nothing and their thumbnails capture nothing.
 
 Recording: `recordings/fast-switcher.mp4` (`scripts/fast-switcher-demo.sh`), 27 s.
+
+## Control centre lists in fixed boxes (2026-09-26)
+
+The Wi-Fi, Bluetooth and output lists in the control centre and the groups
+in the notification centre grew with their rows, so a sheet opened during a
+scan jumped in height as results came in. Every list now sits in a box of
+fixed height from `Theme` and scrolls inside it (`bar/ScrollList.qml`,
+a `ListView` with `clip`, and `bar/ScrollEdges.qml`, the grid's 32 px
+fades and 3 px position hair at sheet scale):
+
+| List | Box | Pinned above the box |
+|---|---|---|
+| Wi-Fi | 7 rows of 40 px, 304 px | the connected network |
+| Bluetooth | 5 rows of 40 px, 216 px | connected devices, at most two |
+| Outputs (sinks) | 3 rows of 34 px, 110 px | none; the default carries a tick |
+| Notification centre | 560 px | none |
+
+The pinned rows take room from the top of the box, so the box keeps its
+height whether something is connected or not. An empty box holds a quiet
+placeholder: "Scanning…", "Wi-Fi is off.", "No Wi-Fi adapter found.",
+"No networks in range.", "Searching…", "No devices.", "No outputs." and the
+centre's "Nothing yet…". The Wi-Fi password prompt now covers the bottom of
+the box (the list gets a bottom margin so every row can still be reached)
+instead of adding 76 px to the sheet. Power profiles are three fixed
+segments and were left alone.
+
+Lab: `scripts/lab.py up` (from a worktree with its own `lab/`),
+`lab.py audio`, and the shell with fake radios, which are new:
+`HNS_FAKE_WIFI=<n>` and `HNS_FAKE_BT=<n>` swap NetworkManager and BlueZ for
+`services/FakeRadios.qml`. The fake Wi-Fi device has one connected network
+at once, and the other n−1 arrive one by one over 2 s after the scan
+starts. The fake adapter has a connected pair of headphones and a paired
+keyboard, and the rest arrive over 2 s after a search starts. Signal
+strengths wobble every 700 ms. `ipc call qs fakeReset` starts them over. With
+the fakes on, every radio control in the sheet drives the fake objects, so
+no check scanned, toggled or connected on the host.
+
+| Check | How | Result |
+|---|---|---|
+| Height while Wi-Fi fills | `HNS_FAKE_WIFI=16`, `ipc call qs section wifi`, screenshots at 0, 0.9, 1.8, 2.7 s | the sheet top stays at the same y in all four: "Scanning…" under the pinned Darkroom row, then rows filling the box |
+| Height while Bluetooth fills | `HNS_FAKE_BT=9`, click "Search for devices", screenshots before, at 0.6 s and 3 s | same sheet top; devices arrive under the pinned headphones |
+| Centre while notifications arrive | centre open empty, nine `notify-send` 150 ms apart | same sheet top from "Nothing yet…" to nine cards in three groups; the last cards fade under the bottom edge |
+| Wheel | `hns-lab-scroll --at 250 900 1` | one click moves 1.5 rows with a 120 ms glide. Before the fix it did nothing: every row's `Pressable` has a `MouseArea` with `onWheel`, which took the event. `ScrollEdges` now catches the wheel above the rows, and presses and hover still reach them |
+| Touchpad, drag | `--finger 30 30 30`, `--drag` | follow the pointer 1:1; drag stops at the ends (`StopAtBounds`) |
+| Keys | `hns-lab-keys tap:Down tap:End tap:Up` | the visible list has focus on open and on a section change; Up/Down move a row, PageUp/PageDown a box, Home/End the ends; Esc still closes the sheet |
+| Fades and hair | screenshots at the top, middle and end | the top fade only when scrolled, the bottom one only while more is below; the hair shows while moving and is gone 800 ms later; rows arriving below do not flash it |
+| Delegates kept | `HNS_PERF=1` logs each row's creation; 16 networks, wobbling strengths and reorders, seven wheel scrolls | 16 rows created, one per network. With the `ListView`'s default cache, rows scrolled out and back were created again (23), so the box keeps all rows (`cacheBuffer` 3000, 60 rows at most) |
+| Scroll position | scroll one click at 2 s, while networks are still arriving | new rows below leave `contentY` alone. Saved and strong networks sort in above the view, so the top visible row is anchored and held in place (it stayed at the top) |
+| Open speed | `HNS_PERF=1`, six opens across wifi/bluetooth/sound, three centre opens | first frame 1–4 ms, 0 ms GUI stall, worst frame interval in the rise 17–18 ms (as before) |
+| Without fakes | shell started with `HNS_FAKE_*` unset, sound view only | no QML warnings; lists built from the host's cached data, read only; the Wi-Fi view was not opened, so no scan |
+
+The sheet's height `Behavior` (a 160 ms glide while it is open) is
+unchanged. It now only plays when you switch between views, because a view
+no longer changes height by itself.
+
+Found on the way: the Wi-Fi rows compared against `WifiSecurityType.None`,
+which does not exist (the enum has `Open`). The lock glyph showed on every
+network, and an open network asked for a password. They now use `Open`.
+
+Recording: `recordings/hyprnav-cc-lists.mp4` (`scripts/cc-lists-demo.sh`), 27 s.

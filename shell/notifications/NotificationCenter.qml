@@ -10,7 +10,9 @@ import ".."
 
 // The session's notifications, grouped by app, in one sheet beside the bar.
 // Opens from the bar's bell or `qs ipc call center toggle`. Opening marks
-// everything as seen; do not disturb lives in the header.
+// everything as seen; do not disturb lives in the header. The groups scroll
+// in a box of fixed height (Theme.centerListH), so the sheet is the same size
+// with one notification or fifty and does not grow while they arrive.
 SheetWindow {
     id: win
     required property var modelData
@@ -23,11 +25,11 @@ SheetWindow {
     anchors { top: true; bottom: true; left: true }
     margins { top: 8; bottom: 8; left: 52 }
     implicitWidth: 400
-    sheetHeight: head.implicitHeight + Math.min(list.contentHeight, 640) + Theme.s24 + Theme.s12
+    sheetHeight: head.implicitHeight + Theme.centerListH + Theme.s24 + Theme.s12
     WlrLayershell.namespace: "hyprnav-shell-notification-center"
 
     PerfProbe { id: perf; label: "center" }
-    onOpened: { perf.arm("open"); openCount++; Services.Notifs.markSeen(); }
+    onOpened: { perf.arm("open"); openCount++; Services.Notifs.markSeen(); Qt.callLater(() => list.forceActiveFocus()); }
     onDismissed: Services.Notifs.markSeen()
 
     ColumnLayout {
@@ -71,13 +73,6 @@ SheetWindow {
         }
 
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.emulsion }
-
-        Text {
-            visible: Services.Notifs.count === 0
-            text: "Nothing yet. Notifications from this session collect here."
-            color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13
-            wrapMode: Text.Wrap; Layout.fillWidth: true
-        }
     }
 
     Flickable {
@@ -86,6 +81,8 @@ SheetWindow {
         contentHeight: groupsCol.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        activeFocusOnTab: true
+        Keys.onPressed: ev => listEdges.key(ev)
 
         Column {
             id: groupsCol
@@ -163,5 +160,15 @@ SheetWindow {
                 }
             }
         }
+    }
+    ScrollEdges { id: listEdges; anchors.fill: list; flick: list; step: 72 }
+    Text {
+        anchors.centerIn: list
+        width: list.width
+        horizontalAlignment: Text.AlignHCenter
+        visible: Services.Notifs.count === 0
+        text: "Nothing yet. Notifications from this session collect here."
+        color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13
+        wrapMode: Text.Wrap
     }
 }

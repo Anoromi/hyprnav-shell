@@ -158,6 +158,8 @@ ShellRoot {
         }
         function clearNotifications(): void { Services.Notifs.clearAll(); }
         function nightLight(): void { Services.NightLight.toggle(); }
+        // Lab only (HNS_FAKE_WIFI / HNS_FAKE_BT): put the fake radios back to their start.
+        function fakeReset(): void { Services.FakeRadios.reset(); }
         function state(): string {
             return JSON.stringify({ shown: quick.instances.filter(q => q.shown).map(q => q.screen.name),
                 nightLight: Services.NightLight.active, nightLightTool: Services.NightLight.tool,
