@@ -9,7 +9,9 @@ import "bar"
 // Volume and brightness pill beside the bar, 1.5 s after the last change.
 // Volume follows the default sink's PipeWire node (its volume and mute
 // properties change on PipeWire events); brightness follows the sysfs watch
-// in services/Brightness.qml. Only the focused screen shows it.
+// in services/Brightness.qml. Only the focused screen shows it. The surface
+// stays mapped (input region empty) so a change never waits for a new window;
+// the pill rises from the bar edge like the sheets and leaves faster.
 PanelWindow {
     id: win
     required property var modelData
@@ -19,7 +21,7 @@ PanelWindow {
     property string kind: "volume"          // volume | brightness
     property bool shown: false
 
-    visible: primary && (shown || fade.running)
+    visible: primary
     anchors { left: true; bottom: true }
     margins { left: 52; bottom: Math.round(screen.height * 0.18) }
     implicitWidth: 248
@@ -55,14 +57,24 @@ PanelWindow {
     readonly property real value: kind === "volume" ? (Services.Audio.muted ? 0 : Services.Audio.volume) : Services.Brightness.level
 
     Rectangle {
+        id: pill
         anchors.fill: parent
-        radius: 24
+        radius: height / 2
         color: Theme.sheet
         border.color: Theme.emulsion
-        opacity: win.shown ? 1 : 0
-        x: win.shown ? 0 : -8
-        Behavior on opacity { NumberAnimation { id: fade; duration: Theme.tScrim; easing.type: Easing.OutCubic } }
-        Behavior on x { NumberAnimation { duration: Theme.tScrim; easing.type: Easing.OutCubic } }
+        visible: opacity > 0
+        opacity: 0
+        scale: 0.97
+        transformOrigin: Item.Left
+        transform: Translate { id: shift; x: -Theme.riseDistance }
+        states: State {
+            name: "shown"; when: win.shown
+            PropertyChanges { pill.opacity: 1; pill.scale: 1; shift.x: 0 }
+        }
+        transitions: [
+            Transition { to: "shown"; NumberAnimation { targets: [pill, shift]; properties: "opacity,scale,x"; duration: Theme.tOpen; easing.type: Easing.OutCubic } },
+            Transition { from: "shown"; NumberAnimation { targets: [pill, shift]; properties: "opacity,scale,x"; duration: Theme.tClose; easing.type: Easing.InCubic } }
+        ]
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: Theme.s16; anchors.rightMargin: Theme.s16

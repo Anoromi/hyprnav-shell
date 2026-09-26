@@ -50,14 +50,26 @@ Singleton {
         }
     }
 
+    // One write in flight at a time. A slider drag asks for a level on every
+    // pointer event; the latest request waits for the running write and older
+    // ones are dropped, so the drag never queues processes and the last value
+    // always lands. Writes are at least 40 ms apart.
+    property real pending: -1
     Process {
         id: writer
         stderr: StdioCollector { onStreamFinished: root.error = text.trim() !== "" ? "Cannot change brightness: " + text.trim().split("\n")[0] : "" }
-        onExited: code => { if (code === 0) root.error = ""; curFile.reload(); }
+        onExited: code => { if (code === 0) root.error = ""; if (root.pending >= 0) gap.restart(); else curFile.reload(); }
     }
+    Timer { id: gap; interval: 40; onTriggered: root.flush() }
     function setLevel(v) {
         if (!available) return;
-        const n = Math.round(Math.max(0.02, Math.min(1, v)) * max);
+        pending = v;
+        if (!writer.running && !gap.running) flush();
+    }
+    function flush() {
+        if (pending < 0 || writer.running) return;
+        const n = Math.round(Math.max(0.02, Math.min(1, pending)) * max);
+        pending = -1;
         const name = device.split("/").pop();
         if (device.startsWith("/sys/class/backlight/") && hasBrightnessctl)
             writer.command = ["brightnessctl", "-q", "-d", name, "set", String(n)];

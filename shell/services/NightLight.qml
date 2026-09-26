@@ -4,8 +4,8 @@ import Quickshell
 import Quickshell.Io
 
 // Night light through hyprsunset, or wlsunset where hyprsunset is missing.
-// The tool is looked up once at start and again whenever quick settings
-// open (`probe()`); nothing is polled. A filter the shell started runs as a
+// The tool is looked up once at start and again when quick settings
+// open (`probe()`, throttled); nothing is polled. A filter the shell started runs as a
 // child Process; one found running already is stopped by exact process name.
 Singleton {
     id: root
@@ -15,7 +15,16 @@ Singleton {
     readonly property bool active: runner.running || external
     property int temperature: 4000
 
-    function probe() { if (!detector.running) detector.running = true; }
+    // Re-checked when quick settings open, but at most every 30 s and only
+    // after the sheet has finished rising: starting a process forks the whole
+    // shell on the GUI thread, which is not free in the middle of an animation.
+    property real probedAt: 0
+    function probe() {
+        if (detector.running || Date.now() - probedAt < 30000) return;
+        probedAt = Date.now();
+        probeLater.restart();
+    }
+    Timer { id: probeLater; interval: 400; onTriggered: detector.running = true }
     function toggle() {
         if (!available) return;
         if (runner.running) { runner.running = false; return; }
@@ -30,6 +39,7 @@ Singleton {
     Process {
         id: detector
         running: true
+        Component.onCompleted: root.probedAt = Date.now()
         command: ["sh", "-c", "t=; for c in hyprsunset wlsunset; do command -v $c >/dev/null && { t=$c; break; }; done; echo \"$t\"; [ -n \"$t\" ] && pgrep -x \"$t\" >/dev/null && echo running; true"]
         stdout: StdioCollector {
             onStreamFinished: {

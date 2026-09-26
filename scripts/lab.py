@@ -93,6 +93,9 @@ hl.config({{
     xwayland = {{ enabled = false }},
     debug = {{ suppress_errors = true }},
 }})
+-- The live session's fade speed, so layer surfaces that map and unmap get
+-- the same compositor fade here as there.
+hl.animation({{ leaf = "fade", enabled = true, speed = 7, bezier = "default" }})
 hl.window_rule({{
     name = "approval-floats",
     match = {{ title = "^Approval needed$" }},

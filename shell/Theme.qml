@@ -54,7 +54,8 @@ Singleton {
     readonly property int s24: 24
     readonly property int s32: 32
     readonly property int rFrame: 3      // thumbnails: nearly square, like a print
-    readonly property int rSheet: 10     // panels
+    readonly property int rSheet: 8      // panels, tiles, rows, buttons: one radius
+    readonly property int rControl: 8
     readonly property int ringWidth: 3
 
     // Motion
@@ -63,6 +64,14 @@ Singleton {
     readonly property int tScrim: reducedMotion ? 0 : 120
     readonly property int tRise: reducedMotion ? 0 : 160
     readonly property int tStagger: reducedMotion ? 0 : 12
+    // Bar and sheets: hover and press states, sheets rising from the bar edge
+    // (open slower than close, so a dismissal never feels sticky).
+    readonly property int tHover: reducedMotion ? 0 : 120
+    readonly property int tOpen: reducedMotion ? 0 : 180
+    readonly property int tClose: reducedMotion ? 0 : 110
+    readonly property int tStaggerList: reducedMotion ? 0 : 22
+    readonly property int riseDistance: reducedMotion ? 0 : 12
+    readonly property color hover: Qt.rgba(0.227, 0.216, 0.200, 0.7)   // emulsion, 70 %
     readonly property real springStiffness: 320
     readonly property real springDamping: 26
 }

@@ -2,10 +2,12 @@
 // or touchpad scroll. The seat helper only keeps the devices alive; this one
 // drives them.
 //
-//   hns-lab-scroll [--at X Y] [--click left|right|middle] [--finger] [--delay MS] STEPS...
+//   hns-lab-scroll [--at X Y] [--click left|right|middle] [--drag X Y N]
+//                  [--finger] [--delay MS] STEPS...
 //
 // --click presses and releases the button once, after the move and before
-// any scroll steps.
+// any scroll steps. --drag presses the left button at the --at position,
+// moves to X Y in N even steps --delay ms apart, and releases there.
 // Each STEP is a signed number: wheel clicks by default (positive scrolls
 // down), pixels with --finger. Without --at the pointer is left where it is.
 #define _GNU_SOURCE
@@ -37,12 +39,14 @@ int main(int argc, char **argv) {
     int finger = 0, have_at = 0, delay_ms = 40;
     uint32_t click = 0;
     uint32_t at_x = 0, at_y = 0, ex = 1920, ey = 1080;
+    int drag = 0, drag_x = 0, drag_y = 0, drag_n = 0;
     double steps[256];
     int nsteps = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--finger")) finger = 1;
         else if (!strcmp(argv[i], "--at") && i + 2 < argc) { have_at = 1; at_x = atoi(argv[++i]); at_y = atoi(argv[++i]); }
         else if (!strcmp(argv[i], "--extent") && i + 2 < argc) { ex = atoi(argv[++i]); ey = atoi(argv[++i]); }
+        else if (!strcmp(argv[i], "--drag") && i + 3 < argc) { drag = 1; drag_x = atoi(argv[++i]); drag_y = atoi(argv[++i]); drag_n = atoi(argv[++i]); }
         else if (!strcmp(argv[i], "--delay") && i + 1 < argc) delay_ms = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--click") && i + 1 < argc) {
             const char *b = argv[++i];
@@ -73,6 +77,23 @@ int main(int argc, char **argv) {
         zwlr_virtual_pointer_v1_frame(p);
         wl_display_roundtrip(d);
         usleep(40000);
+    }
+    if (drag && drag_n > 0) {
+        zwlr_virtual_pointer_v1_button(p, now_ms(), 0x110, WL_POINTER_BUTTON_STATE_PRESSED);
+        zwlr_virtual_pointer_v1_frame(p);
+        wl_display_roundtrip(d);
+        for (int i = 1; i <= drag_n; i++) {
+            usleep(delay_ms * 1000);
+            double f = (double)i / drag_n;
+            zwlr_virtual_pointer_v1_motion_absolute(p, now_ms(), (uint32_t)(at_x + (drag_x - (double)at_x) * f),
+                                                    (uint32_t)(at_y + (drag_y - (double)at_y) * f), ex, ey);
+            zwlr_virtual_pointer_v1_frame(p);
+            wl_display_flush(d);
+        }
+        usleep(delay_ms * 1000);
+        zwlr_virtual_pointer_v1_button(p, now_ms(), 0x110, WL_POINTER_BUTTON_STATE_RELEASED);
+        zwlr_virtual_pointer_v1_frame(p);
+        wl_display_roundtrip(d);
     }
     for (int i = 0; i < nsteps; i++) {
         uint32_t t = now_ms();
