@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import "../services" as Services
 import ".."
 
 // A sheet beside the bar: the control centre, the notification centre and
@@ -9,6 +10,12 @@ import ".."
 // and offset. Creating the surface on every open cost a new QQuickWindow, a
 // render thread and a GL context each time (see TESTING.md, "Control centre
 // speed").
+//
+// Dismissal: on open the sheet claims keyboard focus (Exclusive for 100 ms,
+// then OnDemand, see ClickCatcher.qml for why), so Esc closes it at once, and
+// ClickCatcher.qml closes it on a press anywhere outside the sheets and the
+// bar. The bar stays clickable, so the button that opened a sheet toggles it
+// closed.
 PanelWindow {
     id: win
     property bool shown: false
@@ -29,7 +36,11 @@ PanelWindow {
     exclusionMode: ExclusionMode.Ignore
     color: "transparent"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: shown ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: !shown ? WlrKeyboardFocus.None : (claiming ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.OnDemand)
+    property bool claiming: false
+    onShownChanged: { claiming = shown; if (shown) claim.restart(); Services.Sheets.open += shown ? 1 : -1; }
+    Timer { id: claim; interval: 100; onTriggered: win.claiming = false }
+    Connections { target: Services.Sheets; function onCloseAll() { win.close(); } }
     // Closed: an empty input region, clicks fall through to whatever is below.
     mask: shown ? onSheet : nowhere
     Region { id: onSheet; item: sheet }

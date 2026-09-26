@@ -75,6 +75,11 @@ ShellRoot {
         model: root.hasComponent("center") ? root.screens : []
         NotificationCenter { id: c; onOpened: root.closeOthers(c.screen, c) }
     }
+    // Click-away for the sheets, one per screen (see ClickCatcher.qml).
+    Variants {
+        model: root.hasComponent("qs") || root.hasComponent("center") || root.hasComponent("bar") ? root.screens : []
+        ClickCatcher {}
+    }
     Variants {
         model: root.hasComponent("bar") ? root.screens : []
         Bar {
