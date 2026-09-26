@@ -8,6 +8,7 @@ import Quickshell.Bluetooth
 import Quickshell.Services.UPower
 import Quickshell.Services.SystemTray
 import Quickshell.Widgets
+import QtQuick.Effects
 import "../services" as Services
 import ".."
 
@@ -58,123 +59,177 @@ PanelWindow {
     readonly property bool batteryLow: battery && battery.isPresent && battery.percentage < 0.15
         && battery.state !== UPowerDeviceState.Charging && battery.state !== UPowerDeviceState.FullyCharged
 
-    // One hover label for every button in the column, beside the bar.
+    // One hover label for every button in the column, beside the bar. It
+    // lives on a strip surface that stays mapped with an empty input region:
+    // a popup window per hover would create a new window and GL context
+    // every time the pointer crossed a button.
     property string tipText: ""
     property real tipY: 0
-    function tip(item, text) { tipY = item.mapToItem(null, 0, item.height / 2).y; tipText = text; }
-    function untip() { tipText = ""; }
-    PopupWindow {
-        anchor.window: bar
-        anchor.rect.x: bar.width + 6
-        anchor.rect.y: bar.tipY - height / 2
-        implicitWidth: tipLabel.implicitWidth + 16
-        implicitHeight: tipLabel.implicitHeight + 10
-        visible: bar.tipText !== ""
+    function tip(item, text) { tipY = item.mapToItem(null, 0, item.height / 2).y; tipText = text; tipHide.stop(); }
+    function untip() { tipHide.restart(); }
+    Timer { id: tipHide; interval: 60; onTriggered: bar.tipText = "" }
+    PanelWindow {
+        id: tips
+        screen: bar.screen
+        anchors { top: true; bottom: true; left: true }
+        margins { left: bar.width + 6 }
+        implicitWidth: 260
+        exclusionMode: ExclusionMode.Ignore
         color: "transparent"
+        mask: Region {}
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.namespace: "hyprnav-shell-bar-tips"
         Rectangle {
-            anchors.fill: parent; radius: 4
+            id: tipBox
+            // Hidden while a sheet is open: it would sit on top of the sheet.
+            readonly property bool on: bar.tipText !== "" && Services.Sheets.open === 0
+            property string text: ""
+            Connections { target: bar; function onTipTextChanged() { if (bar.tipText !== "") tipBox.text = bar.tipText; } }
+            y: bar.tipY - height / 2
+            width: tipLabel.implicitWidth + Theme.s16
+            height: tipLabel.implicitHeight + 10
+            radius: 6
             color: Theme.darkroom; border.color: Theme.emulsion
-            Text { id: tipLabel; anchors.centerIn: parent; text: bar.tipText; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs12 }
+            opacity: on ? 1 : 0
+            transform: Translate { x: tipBox.on ? 0 : -4; Behavior on x { NumberAnimation { duration: Theme.tHover; easing.type: Easing.OutCubic } } }
+            Behavior on opacity { NumberAnimation { duration: Theme.tHover } }
+            Behavior on y { enabled: tipBox.opacity > 0; NumberAnimation { duration: Theme.tHover; easing.type: Easing.OutCubic } }
+            Text { id: tipLabel; anchors.centerIn: parent; text: tipBox.text; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs12 }
         }
     }
 
-    component BarButton: Rectangle {
+    component BarButton: Pressable {
         id: btn
         property string glyph: ""
         property string label: ""
-        property bool active: false
         property color glyphColor: active ? Theme.pencil : Theme.paper
-        signal clicked()
         anchors.horizontalCenter: parent ? parent.horizontalCenter : undefined
-        width: 32; height: 28; radius: 4
-        color: active || btnMouse.containsMouse ? Theme.emulsion : "transparent"
-        Behavior on color { ColorAnimation { duration: Theme.tFast } }
-        Glyph { anchors.centerIn: parent; text: btn.glyph; size: 17; color: btn.glyphColor }
-        MouseArea {
-            id: btnMouse; anchors.fill: parent; hoverEnabled: true
-            onClicked: btn.clicked()
-            onContainsMouseChanged: containsMouse ? bar.tip(btn, btn.label) : bar.untip(btn.label)
-        }
+        width: 32; height: 28
+        CrossGlyph { anchors.centerIn: parent; text: btn.glyph; size: 16; color: btn.glyphColor }
+        onHoveredChanged: hovered ? bar.tip(btn, btn.label) : bar.untip()
     }
     TrayMenu { id: trayMenu; bar: bar }
 
+    component Cell: Item {
+        property alias text: g.text
+        property alias color: g.color
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: 32; height: 28
+        CrossGlyph { id: g; anchors.centerIn: parent; size: 16 }
+    }
     component Hair: Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: 16; height: 1; color: Theme.emulsion }
 
     Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: Theme.emulsion }
 
-    // Top: current frame, then the rest of the roll running down.
-    Column {
+    // Top: the roll's frames in order, the current one under a Pencil block
+    // that slides between them (the switcher ring's spring), so a workspace
+    // change reads as movement along the strip rather than a reshuffle.
+    readonly property var frames: roll.map(c => c.snapshot).filter(c => c && !c.unnumbered)
+    readonly property int activeIndex: cell ? frames.findIndex(c => c.slot_index === cell.slot_index) : -1
+    readonly property int pipStep: 28 + Theme.s4
+    Item {
         id: top
         anchors.top: parent.top; anchors.topMargin: Theme.s12
         anchors.horizontalCenter: parent.horizontalCenter
-        spacing: Theme.s4
+        width: 28
+        height: bar.frames.length > 0 ? pips.height : 28
+
+        // A workspace outside hyprnav: its bare number, no roll.
         Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: 28; height: 28; radius: 3
-            color: Theme.pencil
-            visible: bar.cell !== null
-            Text {
-                anchors.centerIn: parent
-                text: bar.cell ? bar.cell.slot_index : ""
-                color: Theme.darkroom
-                font.family: Theme.mono; font.pixelSize: Theme.fs18; font.weight: Font.Bold
-            }
-            MouseArea { anchors.fill: parent; onClicked: Quickshell.execDetached(["qs", "-p", Quickshell.shellDir, "ipc", "call", "grid", "toggle"]) }
-        }
-        Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: 28; height: 28; radius: 3
+            width: 28; height: 28; radius: Theme.rFrame
             color: Theme.emulsion
-            visible: bar.cell === null
+            visible: bar.frames.length === 0 || bar.activeIndex < 0 && bar.cell === null
+            opacity: visible ? 1 : 0
             Text { anchors.centerIn: parent; text: bar.focusedWs ? bar.focusedWs.id : ""; color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs15 }
         }
-        Item { width: 1; height: Theme.s4 }
-        Repeater {
-            model: bar.roll.map(c => c.snapshot).filter(c => c !== bar.cell && !c.unnumbered && !(bar.cell && c.slot_index === bar.cell.slot_index))
-            Rectangle {
-                id: pip
-                required property var modelData
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: 28; height: 24; radius: 3
-                color: pipMouse.containsMouse ? Theme.emulsion : "transparent"
-                Behavior on color { ColorAnimation { duration: Theme.tFast } }
-                Text {
-                    anchors.centerIn: parent
-                    text: pip.modelData.slot_index
-                    color: pip.modelData.window_count > 0 ? Theme.paper : Theme.fixer
-                    font.family: Theme.mono; font.pixelSize: Theme.fs15
+        Rectangle {
+            id: pencil
+            width: 28; height: 28; radius: Theme.rFrame
+            color: Theme.pencil
+            visible: bar.frames.length > 0
+            opacity: bar.activeIndex >= 0 ? 1 : 0
+            property real target: Math.max(0, bar.activeIndex) * bar.pipStep
+            y: target
+            Behavior on y { enabled: !Theme.reducedMotion; SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.2 } }
+            Behavior on opacity { NumberAnimation { duration: Theme.tHover } }
+        }
+        Column {
+            id: pips
+            visible: bar.frames.length > 0
+            spacing: Theme.s4
+            Repeater {
+                model: bar.frames
+                Item {
+                    id: pip
+                    required property var modelData
+                    required property int index
+                    readonly property bool current: index === bar.activeIndex
+                    width: 28; height: 28
+                    Rectangle {
+                        anchors.fill: parent; radius: Theme.rFrame
+                        color: pipMouse.containsMouse && !pip.current ? Theme.hover : "transparent"
+                        Behavior on color { ColorAnimation { duration: Theme.tHover } }
+                    }
+                    Text {
+                        anchors.centerIn: parent
+                        text: pip.modelData.slot_index
+                        color: pip.current ? Theme.darkroom : (pip.modelData.window_count > 0 ? Theme.paper : Theme.fixer)
+                        font.family: Theme.mono; font.pixelSize: pip.current ? Theme.fs18 : Theme.fs15
+                        font.weight: pip.current ? Font.Bold : Font.Normal
+                        Behavior on color { ColorAnimation { duration: Theme.tHover } }
+                    }
+                    // Pin: a spawned process tree is stuck to this frame.
+                    Glyph { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: -3; anchors.topMargin: -5; visible: pip.modelData.stuck === true; text: "󰐃"; size: 12; color: Theme.pencil }
+                    MouseArea {
+                        id: pipMouse; anchors.fill: parent; hoverEnabled: true
+                        onClicked: pip.current
+                            ? Quickshell.execDetached(["qs", "-p", Quickshell.shellDir, "ipc", "call", "grid", "toggle"])
+                            : Services.Hyprnav.gotoSlot(pip.modelData.environment_id, pip.modelData.slot_index)
+                    }
                 }
-                // Pin: a spawned process tree is stuck to this frame.
-                Glyph { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: -3; anchors.topMargin: -5; visible: pip.modelData.stuck === true; text: "󰐃"; size: 12; color: Theme.pencil }
-                MouseArea { id: pipMouse; anchors.fill: parent; hoverEnabled: true; onClicked: Services.Hyprnav.gotoSlot(pip.modelData.environment_id, pip.modelData.slot_index) }
             }
         }
     }
 
-    // Middle: environment title along the edge, reading bottom to top.
+    // Middle: environment title along the edge, reading bottom to top, and a
+    // small Pencil lock after it when the roll is locked.
     Item {
+        id: middle
         anchors.top: top.bottom; anchors.topMargin: Theme.s16
         anchors.bottom: bottomStack.top; anchors.bottomMargin: Theme.s16
         anchors.horizontalCenter: parent.horizontalCenter
         width: parent.width
         clip: true
-        Text {
-            id: envTitle
-            anchors.centerIn: parent
-            rotation: -90
-            width: parent.height
-            text: (bar.cell ? bar.cell.environment_title : "No environment") + (bar.cell && bar.cell.environment_locked ? "   locked" : "")
-            elide: Text.ElideRight
-            horizontalAlignment: Text.AlignLeft
-            color: bar.cell ? Theme.paper : Theme.fixer
-            font.family: Theme.casual; font.pixelSize: Theme.fs15; font.weight: Font.Medium
+        readonly property string title: bar.cell ? (bar.cell.environment_title || bar.cell.environment_name || bar.cell.environment_id || "") : "No environment"
+        readonly property bool locked: bar.cell !== null && bar.cell.environment_locked === true
+        Row {
+            id: titleRow
+            transform: Rotation { angle: -90 }
+            x: (middle.width - height) / 2
+            y: middle.height
+            spacing: Theme.s8
+            Text {
+                id: envTitle
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, middle.height - (lockMark.visible ? lockMark.width + Theme.s8 : 0))
+                text: middle.title
+                elide: Text.ElideRight
+                color: bar.cell ? Theme.paper : Theme.fixer
+                font.family: Theme.casual; font.pixelSize: Theme.fs15; font.weight: Font.Medium
+                Behavior on color { ColorAnimation { duration: Theme.tHover } }
+            }
+            Glyph { id: lockMark; anchors.verticalCenter: parent.verticalCenter; visible: middle.locked; text: "󰌾"; size: 13; color: Theme.pencil; rotation: 90 }
         }
     }
 
-    // Bottom stack, above the clock.
+    // Bottom stack, above the clock. Every row is a 28 px cell, 4 px apart
+    // inside a group and a hairline with 8 px either side between groups, so
+    // the glyphs sit on one rhythm. Glyphs are one family (Material Design
+    // from the Nerd Font) at 16 px; tray icons are drawn flat in Paper at the
+    // same optical size so an app's own colour icon does not break the set.
     Column {
         id: bottomStack
-        anchors.bottom: clock.top; anchors.bottomMargin: Theme.s12
+        anchors.bottom: clock.top; anchors.bottomMargin: Theme.s16
         anchors.horizontalCenter: parent.horizontalCenter
         spacing: Theme.s8
 
@@ -183,7 +238,7 @@ PanelWindow {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: Theme.s4
             BarButton { glyph: "󰀻"; label: "Launcher"; onClicked: Quickshell.execDetached(["vicinae", "toggle"]) }
-            BarButton { glyph: "󰅌"; label: "Clipboard history"; onClicked: Quickshell.execDetached(["vicinae", "cmd", "launch", "clipboard:history"]) }
+            BarButton { glyph: "󰅍"; label: "Clipboard history"; onClicked: Quickshell.execDetached(["vicinae", "cmd", "launch", "clipboard:history"]) }
         }
 
         Hair { visible: SystemTray.items.values.length > 0 }
@@ -193,17 +248,24 @@ PanelWindow {
         // secondary action, the wheel scrolls the item.
         Column {
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 2
+            spacing: Theme.s4
+            visible: SystemTray.items.values.length > 0
             Repeater {
                 model: SystemTray.items
-                Rectangle {
+                Pressable {
                     id: trayItem
                     required property var modelData
                     readonly property string label: modelData.tooltipTitle || modelData.title || modelData.id
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: 32; height: 26; radius: 4
-                    color: trayMouse.containsMouse ? Theme.emulsion : "transparent"
-                    IconImage { anchors.centerIn: parent; implicitSize: 16; source: trayItem.modelData.icon }
+                    width: 32; height: 28
+                    active: trayMenu.shown && trayMenu.item === modelData
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                    IconImage {
+                        anchors.centerIn: parent; implicitSize: 15
+                        source: trayItem.modelData.icon
+                        layer.enabled: true
+                        layer.effect: MultiEffect { brightness: 1.0; colorization: 1.0; colorizationColor: trayItem.active ? Theme.pencil : Theme.paper }
+                    }
                     Rectangle {
                         visible: trayItem.modelData.status === Status.NeedsAttention
                         anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 3
@@ -213,23 +275,21 @@ PanelWindow {
                         const p = trayItem.mapToItem(null, 0, 0);
                         trayMenu.open(trayItem.modelData, p.y);
                     }
-                    MouseArea {
-                        id: trayMouse
-                        anchors.fill: parent; hoverEnabled: true
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-                        onClicked: m => {
-                            const it = trayItem.modelData;
-                            bar.untip(trayItem.label);
-                            if (m.button === Qt.MiddleButton) it.secondaryActivate();
-                            else if (m.button === Qt.RightButton || it.onlyMenu) { if (it.hasMenu) trayItem.openMenu(); }
-                            else it.activate();
+                    onClicked: m => {
+                        const it = trayItem.modelData;
+                        bar.untip();
+                        if (m.button === Qt.MiddleButton) it.secondaryActivate();
+                        else if (m.button === Qt.RightButton || it.onlyMenu) {
+                            if (!it.hasMenu) return;
+                            if (trayMenu.shown && trayMenu.item === it) trayMenu.close(); else trayItem.openMenu();
                         }
-                        onWheel: w => {
-                            const horizontal = w.angleDelta.y === 0;
-                            trayItem.modelData.scroll(horizontal ? w.angleDelta.x : w.angleDelta.y, horizontal);
-                        }
-                        onContainsMouseChanged: containsMouse ? bar.tip(trayItem, trayItem.label) : bar.untip(trayItem.label)
+                        else it.activate();
                     }
+                    onWheel: w => {
+                        const horizontal = w.angleDelta.y === 0;
+                        trayItem.modelData.scroll(horizontal ? w.angleDelta.x : w.angleDelta.y, horizontal);
+                    }
+                    onHoveredChanged: hovered ? bar.tip(trayItem, trayItem.label) : bar.untip()
                 }
             }
         }
@@ -241,7 +301,7 @@ PanelWindow {
         BarButton {
             id: bell
             visible: bar.center !== null
-            glyph: Services.Notifs.dnd ? "󰂛" : (Services.Notifs.unread > 0 ? "󰂞" : "󰂚")
+            glyph: Services.Notifs.dnd ? "󰂛" : (Services.Notifs.unread > 0 ? "󰂞" : "󰂜")
             label: Services.Notifs.dnd ? "Do not disturb" : (Services.Notifs.unread > 0 ? Services.Notifs.unread + " new" : "Notifications")
             active: bar.center !== null && bar.center.shown
             glyphColor: active || Services.Notifs.unread > 0 ? Theme.pencil : (Services.Notifs.dnd ? Theme.fixer : Theme.paper)
@@ -255,34 +315,29 @@ PanelWindow {
         }
 
         // System cluster, one click target: opens quick settings.
-        Rectangle {
+        Pressable {
             id: cluster
             anchors.horizontalCenter: parent.horizontalCenter
             width: 32
-            height: clusterCol.implicitHeight + Theme.s12
-            radius: 4
-            color: (bar.quickSettings && bar.quickSettings.shown) || clusterMouse.containsMouse ? Theme.emulsion : "transparent"
-            Behavior on color { ColorAnimation { duration: Theme.tFast } }
+            height: clusterCol.implicitHeight + Theme.s8
+            active: bar.quickSettings !== null && bar.quickSettings.shown
             Column {
                 id: clusterCol
                 anchors.centerIn: parent
-                spacing: Theme.s8
-                Glyph { anchors.horizontalCenter: parent.horizontalCenter; text: bar.wifiGlyph(); size: 17; color: bar.wifiNet ? Theme.paper : Theme.fixer }
-                Glyph { anchors.horizontalCenter: parent.horizontalCenter; text: bar.btConnected > 0 ? "󰂱" : "󰂯"; size: 17; color: bar.btAdapter && bar.btAdapter.enabled ? Theme.paper : Theme.fixer }
-                Glyph { anchors.horizontalCenter: parent.horizontalCenter; text: Services.Audio.icon(); size: 17 }
+                spacing: 0
+                Cell { text: bar.wifiGlyph(); color: cluster.active ? Theme.pencil : (bar.wifiNet ? Theme.paper : Theme.fixer) }
+                Cell { text: bar.btConnected > 0 ? "󰂱" : "󰂯"; color: bar.btAdapter && bar.btAdapter.enabled ? Theme.paper : Theme.fixer }
+                Cell { text: Services.Audio.icon(); color: Services.Audio.muted ? Theme.fixer : Theme.paper }
                 Column {
                     anchors.horizontalCenter: parent.horizontalCenter
                     visible: bar.battery && bar.battery.isPresent
-                    spacing: 0
-                    Glyph { anchors.horizontalCenter: parent.horizontalCenter; text: bar.batteryGlyph(); size: 17; rotation: 90; color: bar.batteryLow ? Theme.warn : Theme.paper }
+                    spacing: 2
+                    Cell { text: bar.batteryGlyph(); color: bar.batteryLow ? Theme.warn : Theme.paper; rotation: 90; height: 24 }
                     Text { anchors.horizontalCenter: parent.horizontalCenter; text: bar.battery ? Math.round(bar.battery.percentage * 100) : ""; color: bar.batteryLow ? Theme.warn : Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs12 }
                 }
             }
-            MouseArea {
-                id: clusterMouse; anchors.fill: parent; hoverEnabled: true
-                onClicked: if (bar.quickSettings) bar.quickSettings.toggle()
-                onContainsMouseChanged: containsMouse ? bar.tip(cluster, bar.clusterLabel()) : bar.untip(bar.clusterLabel())
-            }
+            onClicked: if (bar.quickSettings) bar.quickSettings.toggle()
+            onHoveredChanged: hovered ? bar.tip(cluster, bar.clusterLabel()) : bar.untip()
         }
     }
     function clusterLabel() {
@@ -291,16 +346,18 @@ PanelWindow {
         return parts.join(", ");
     }
 
+    // Clock: hours over minutes in the regular mono cut (the Medium cut read
+    // heavier than every glyph around it), then the date in Fixer.
     SystemClock { id: clockSrc; precision: SystemClock.Minutes }
     Column {
         id: clock
         anchors.bottom: parent.bottom; anchors.bottomMargin: Theme.s12
         anchors.horizontalCenter: parent.horizontalCenter
         spacing: 0
-        Text { anchors.horizontalCenter: parent.horizontalCenter; text: Qt.formatDateTime(clockSrc.date, "HH"); color: Theme.paper; font.family: Theme.mono; font.pixelSize: Theme.fs15; font.weight: Font.Medium }
-        Text { anchors.horizontalCenter: parent.horizontalCenter; text: Qt.formatDateTime(clockSrc.date, "mm"); color: Theme.paper; font.family: Theme.mono; font.pixelSize: Theme.fs15; font.weight: Font.Medium }
-        Item { width: 1; height: Theme.s4 }
-        Text { anchors.horizontalCenter: parent.horizontalCenter; text: Qt.formatDateTime(clockSrc.date, "d"); color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs12 }
-        Text { anchors.horizontalCenter: parent.horizontalCenter; text: Qt.formatDateTime(clockSrc.date, "MMM"); color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs12 }
+        Text { anchors.horizontalCenter: parent.horizontalCenter; text: Qt.formatDateTime(clockSrc.date, "HH"); color: Theme.paper; font.family: Theme.mono; font.pixelSize: Theme.fs15; font.weight: Font.Normal; lineHeight: 1.1 }
+        Text { anchors.horizontalCenter: parent.horizontalCenter; text: Qt.formatDateTime(clockSrc.date, "mm"); color: Theme.paper; font.family: Theme.mono; font.pixelSize: Theme.fs15; font.weight: Font.Normal; lineHeight: 1.1 }
+        Item { width: 1; height: Theme.s8 }
+        Text { anchors.horizontalCenter: parent.horizontalCenter; text: Qt.formatDateTime(clockSrc.date, "d"); color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs12; lineHeight: 1.2 }
+        Text { anchors.horizontalCenter: parent.horizontalCenter; text: Qt.formatDateTime(clockSrc.date, "MMM"); color: Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs12; lineHeight: 1.2 }
     }
 }

@@ -27,8 +27,36 @@ Rectangle {
         if (name.startsWith("file://")) return name;
         return Quickshell.iconPath(name, true);
     }
-    implicitHeight: body.implicitHeight + Theme.s16
-    radius: 6
+    // Motion: a staggered rise when the centre opens (riseToken bumps, the
+    // card waits riseIndex stagger steps), and on dismiss a slide out to the
+    // right, then the gap closes.
+    property int riseIndex: 0
+    property int riseToken: 0
+    property real appear: 1
+    property real collapse: 1
+    onRiseTokenChanged: rise.restart()
+    function leave(then) { if (!leaving.running) { leaving.then = then; leaving.start(); } }
+    SequentialAnimation {
+        id: rise
+        PropertyAction { target: card; property: "appear"; value: 0 }
+        PauseAnimation { duration: card.riseIndex * Theme.tStaggerList }
+        NumberAnimation { target: card; property: "appear"; to: 1; duration: Theme.tRise; easing.type: Easing.OutCubic }
+    }
+    SequentialAnimation {
+        id: leaving
+        property var then: null
+        ParallelAnimation {
+            NumberAnimation { target: slide; property: "x"; to: card.width * 0.6; duration: Theme.tRise; easing.type: Easing.InCubic }
+            NumberAnimation { target: card; property: "appear"; to: 0; duration: Theme.tRise; easing.type: Easing.InCubic }
+        }
+        NumberAnimation { target: card; property: "collapse"; to: 0; duration: Theme.tClose; easing.type: Easing.OutCubic }
+        ScriptAction { script: if (leaving.then) leaving.then() }
+    }
+    opacity: appear
+    transform: Translate { id: slide; y: (1 - card.appear) * Theme.riseDistance * 0.66 * (card.collapse < 1 || slide.x > 0 ? 0 : 1) }
+    clip: collapse < 1
+    implicitHeight: (body.implicitHeight + Theme.s16) * collapse
+    radius: Theme.rControl
     color: compact ? Theme.emulsion : Theme.sheet
     border.color: critical ? Theme.warn : (compact ? "transparent" : Theme.emulsion)
     RowLayout {
@@ -66,10 +94,10 @@ Rectangle {
                     model: card.live ? card.live.actions : []
                     Rectangle {
                         required property var modelData
-                        width: actText.implicitWidth + 16; height: 24; radius: 4
+                        width: actText.implicitWidth + 16; height: 24; radius: 6
                         color: actMouse.containsMouse ? Theme.pencil : Theme.darkroom
                         Text { id: actText; anchors.centerIn: parent; text: parent.modelData.text; color: actMouse.containsMouse ? Theme.darkroom : Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs12 }
-                        MouseArea { id: actMouse; anchors.fill: parent; hoverEnabled: true; onClicked: { parent.modelData.invoke(); Services.Notifs.dismiss(card.notification); } }
+                        MouseArea { id: actMouse; anchors.fill: parent; hoverEnabled: true; onClicked: { parent.modelData.invoke(); card.leave(() => Services.Notifs.dismiss(card.notification)); } }
                     }
                 }
             }
@@ -77,7 +105,7 @@ Rectangle {
         Glyph {
             text: "󰅖"; size: 13; color: closeMouse.containsMouse ? Theme.paper : Theme.fixer
             Layout.alignment: Qt.AlignTop
-            MouseArea { id: closeMouse; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true; onClicked: Services.Notifs.dismiss(card.notification) }
+            MouseArea { id: closeMouse; anchors.fill: parent; anchors.margins: -4; hoverEnabled: true; onClicked: card.leave(() => Services.Notifs.dismiss(card.notification)) }
         }
     }
 }

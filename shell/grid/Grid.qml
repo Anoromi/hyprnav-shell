@@ -381,13 +381,15 @@ PanelWindow {
                                 // number: they carry their name in Casual instead.
                                 Rectangle {
                                     x: 6; y: 6
-                                    width: num.implicitWidth + 10; height: 20
+                                    width: Math.min(num.implicitWidth + 10, win.cellW - 36); height: 20
                                     radius: 2
                                     color: cellItem.isSelected ? Theme.pencil : Theme.darkroom
                                     Behavior on color { ColorAnimation { duration: Theme.tFast } }
                                     Text {
                                         id: num
                                         anchors.centerIn: parent
+                                        width: Math.min(implicitWidth, parent.width - 10)
+                                        elide: Text.ElideRight
                                         text: cellItem.cell.unnumbered ? cellItem.cell.workspace_name : cellItem.cell.slot_index
                                         color: cellItem.isSelected ? Theme.darkroom : Theme.paper
                                         font.family: cellItem.cell.unnumbered ? Theme.casual : Theme.mono
@@ -433,6 +435,8 @@ PanelWindow {
                                     visible: cellItem.cell.temporary === true && cellItem.cell.empty_for_ms !== null && cellItem.cell.empty_for_ms !== undefined && !cellItem.agent
                                     Glyph { text: "󰔟"; size: 12; color: Theme.fixer }
                                     Text {
+                                        width: Math.min(implicitWidth, win.cellW - 32)
+                                        elide: Text.ElideRight
                                         text: "empty " + Math.round((cellItem.cell.empty_for_ms || 0) / 1000) + " s, gone at 30"
                                         color: Theme.fixer
                                         font.family: Theme.sans; font.pixelSize: Theme.fs12

@@ -232,3 +232,105 @@ the firmware handles without a userspace write (inotify would not see them),
 area screenshots (slurp needs a drag), and a tray app with submenus.
 
 Recording: `recordings/hyprnav-bar.mp4` (`scripts/bar-demo.sh`), 65 s.
+
+## Control centre speed, click-away and motion (2026-09-26)
+
+The user reported the control centre as "very laggy and slow" on the live
+2880x1800 panel. Measured in the lab (1920x1080, `scripts/lab.py up`,
+`lab.py audio`, `HNS_BACKLIGHT=/tmp/hns-bl`) against a worktree of
+`a5cd160` with the same probe added. `HNS_PERF=1` turns on `PerfProbe.qml`:
+time from `show()` to the window's next swapped frame, the longest GUI-thread
+stall (a 4 ms timer that notices when it runs late) over the first 1.5 s,
+and frame intervals while a slider is dragged. Pointer drags come from
+`hns-lab-scroll --drag` (new: press, N moves `--delay` ms apart, release).
+The lab compositor now uses the live session's `fade` animation (speed 7).
+
+Root causes, with the evidence:
+
+1. **A new window on every open.** `QuickSettings` (and the centre) set
+   `visible: phase !== "closed"`, which destroys the layer surface on close.
+   `QSG_INFO=1` showed `Creating QRhi with backend OpenGL for window 0x…` on
+   every open, a different window address and render thread each time, a new
+   GL context, pipeline cache seeding and a fresh glyph atlas; the first
+   frame's sync took 8 ms and the GUI thread sat in `blockedForSync` 17–22 ms.
+   The hover tooltip (a `PopupWindow` toggled per hover) and the OSD paid the
+   same on every appearance.
+2. **The compositor fade.** A freshly mapped layer surface gets Hyprland's
+   layer fade; with the live `fade` speed of 7 the sheet reached 90 % of its
+   final brightness after 250 ms and settled after 400 ms (60 fps recording
+   of a patch on the volume slider). A kept-mapped surface is never re-mapped,
+   so only the shell's own 180 ms rise plays.
+3. **Scan and rebuild.** Every open turned the Wi-Fi scanner on, even for the
+   sound view. The network and Bluetooth lists were sorted inside a binding,
+   so each scan result or signal-strength change produced a new array and the
+   `Repeater` destroyed and rebuilt every row, hidden sections included.
+4. **Smaller:** the night-light probe forked `sh` from the GUI thread on
+   every open; the slider thumb waited for PipeWire or the backlight file to
+   echo the value before moving; a brightness write while one was running was
+   dropped.
+5. Not found: no blur or shadow effects anywhere, no fonts or images loaded at
+   open (fonts load once in `Theme`), no synchronous process calls (Quickshell
+   `Process` is asynchronous; `nmcli`/`bluetoothctl`/`wpctl` are not used).
+
+Fixes: `bar/SheetWindow.qml` keeps the surface mapped and switches the input
+region (`mask`), keyboard interactivity and the sheet's opacity/offset; the
+tooltip strip and the OSD stay mapped with an empty input region. The Wi-Fi
+and Bluetooth lists are refreshed on a 250 ms debounce while the sheet is
+open and assigned only when the set or order changes (signal strength sorts
+in coarse steps); the scan starts after the Wi-Fi view has been open for 1 s
+or from its Scan button, and stops on close. Night light probes at most every
+30 s, 400 ms after the rise. Sliders move from a local value while dragged;
+brightness keeps one write in flight, at least 40 ms apart, and always writes
+the last value.
+
+| Measure | Before (`a5cd160`) | After |
+|---|---|---|
+| `show()` to first swapped frame, sound view, 6 opens | 19, 26, 33, 41, 45, 191 ms (another run: 28–67, one 265) | 0–2 ms (24 ms on the first open after start) |
+| Wi-Fi view, 3 opens | 30–36 ms | 1–3 ms |
+| Notification centre, 4 opens | 20–34 ms | 1 ms |
+| Longest GUI stall in the first 1.5 s | 32–69 ms | 0 ms at first frame |
+| Frames during the open animation (first 300 ms) | 8–12, worst interval up to 76 ms | 12–13, worst 18 ms (one 33 ms) |
+| On screen, 90 % / settled (60 fps recording) | 250 / 400 ms | 100 / 133 ms |
+| Close, on screen | 67–133 ms | 100 ms |
+| Volume drag, 90 moves at 8 ms | 60 fps, GUI stalls 39–137 ms, thumb follows PipeWire | 60 fps (mean 16.6–17.1 ms), GUI stalls 13–15 ms, thumb follows the pointer |
+| Brightness drag | 60 fps, one write per pointer event when idle | 60 fps, writes coalesced, last value lands (8/120 for a release at 6.5 %) |
+| Hover label | new popup window per hover | no window created |
+
+The lab machine was also running other work; the before numbers varied
+between runs, the after ones did not. The live panel is 2880x1800 with DMS
+beside the shell, where each window creation also allocated larger buffers;
+not measured there (by rule the live session is not touched).
+
+A side finding from the recordings: with the old code a second click on the
+cluster without moving the pointer was ignored after the sheet's surface had
+just been mapped (Hyprland had not re-targeted pointer focus); with kept
+surfaces it toggles every time.
+
+### Click-away
+
+| Tried | Result |
+|---|---|
+| `HyprlandFocusGrab` on the sheet and the bar | outside press clears the grab and closes; bar clicks still work; but with `WlrKeyboardFocus.Exclusive` the grab is cleared the moment it starts, and with `OnDemand` Esc only works after a click inside |
+| Exclusive keyboard for as long as the sheet is open | Esc works; Hyprland then delivers no presses to any other surface, the catcher never sees one |
+| **Kept:** `ClickCatcher.qml` (Top layer, whole screen right of the bar, empty input region until a sheet opens) plus Exclusive keyboard for the first 100 ms, then OnDemand | press on the desktop closes (the press is not passed on); Esc closes; press on the clock leaves it open; the cluster button toggles it; same for the centre and the tray menu |
+
+### Motion and polish
+
+Theme tokens: `tHover` 120, `tOpen` 180, `tClose` 110, `tStaggerList` 22,
+`riseDistance` 12, one radius (`rSheet`/`rControl` 8). All become 0 with
+`HNS_REDUCED_MOTION=1`.
+
+| Element | Check | Result |
+|---|---|---|
+| Sheets and tray menu | open/close via bar, IPC | rise from the bar edge (12 px, scale 0.97 to 1, fade, OutCubic 180 ms), close InCubic 110 ms |
+| Bar buttons | hover, press | Emulsion wash and 1 px lift, press shrinks to 0.96, 120 ms |
+| Workspace pips | click 3, 4, 1 | frames stay in slot order, the Pencil block springs between them |
+| Tiles | night light, do not disturb | fill, Pencil edge and icon cross-fade |
+| Sliders | drag | thumb grows 1.35x, value label turns Pencil and bold; outside changes glide |
+| Notification centre | open with four entries in two groups | headers and cards rise 22 ms apart; × slides the card out and closes the gap |
+| OSD | `wpctl set-volume`, backlight writes | same rise and faster exit |
+| Bar glyphs | screenshot | one family at 16 px, tray icons flattened to Paper (MultiEffect on a 15 px icon), clock in the regular mono cut, date and battery spaced off their glyphs |
+| Grid | long temporary names | frame badge and empty timer elide inside the frame |
+
+Recording: `recordings/hyprnav-bar-polish.mp4` (`scripts/bar-polish-demo.sh`
+plus a 10 s half-speed before/after), 62 s.

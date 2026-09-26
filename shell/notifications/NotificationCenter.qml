@@ -17,6 +17,8 @@ SheetWindow {
     screen: modelData
     property var expanded: ({})             // app name -> true when the group shows all
     readonly property int perGroup: 3
+    // Bumps on every open; entries replay their staggered rise when it changes.
+    property int openCount: 0
 
     anchors { top: true; bottom: true; left: true }
     margins { top: 8; bottom: 8; left: 52 }
@@ -25,7 +27,7 @@ SheetWindow {
     WlrLayershell.namespace: "hyprnav-shell-notification-center"
 
     PerfProbe { id: perf; label: "center" }
-    onOpened: { perf.arm("open"); Services.Notifs.markSeen(); }
+    onOpened: { perf.arm("open"); openCount++; Services.Notifs.markSeen(); }
     onDismissed: Services.Notifs.markSeen()
 
     ColumnLayout {
@@ -94,14 +96,27 @@ SheetWindow {
                 Column {
                     id: group
                     required property var modelData
+                    required property int index
                     readonly property bool open: win.expanded[modelData.app] === true
                     readonly property int hidden: Math.max(0, modelData.entries.length - win.perGroup)
                     width: groupsCol.width
                     spacing: Theme.s4
 
                     RowLayout {
+                        id: groupHead
                         width: parent.width
                         spacing: Theme.s8
+                        // Rises with the group's first card, one stagger step ahead.
+                        property real appear: 1
+                        opacity: appear
+                        transform: Translate { y: (1 - groupHead.appear) * Theme.riseDistance * 0.66 }
+                        SequentialAnimation {
+                            id: headRise
+                            PropertyAction { target: groupHead; property: "appear"; value: 0 }
+                            PauseAnimation { duration: Math.min(group.index * 4, 12) * Theme.tStaggerList }
+                            NumberAnimation { target: groupHead; property: "appear"; to: 1; duration: Theme.tRise; easing.type: Easing.OutCubic }
+                        }
+                        Connections { target: win; function onOpenCountChanged() { headRise.restart(); } }
                         // App icon when the theme has one, else the app's initial.
                         Item {
                             readonly property string icon: {
@@ -128,7 +143,13 @@ SheetWindow {
                     }
                     Repeater {
                         model: group.open ? group.modelData.entries : group.modelData.entries.slice(0, win.perGroup)
-                        NotificationCard { required property var modelData; notification: modelData; compact: true; width: group.width }
+                        NotificationCard {
+                            required property var modelData
+                            required property int index
+                            notification: modelData; compact: true; width: group.width
+                            riseIndex: Math.min(group.index * 4 + index + 1, 12)
+                            riseToken: win.openCount
+                        }
                     }
                     Text {
                         visible: group.hidden > 0

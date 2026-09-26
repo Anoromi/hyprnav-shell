@@ -28,13 +28,16 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
   the end of the roll of the environment that owns it, and nowhere else: a
   child roll inherits its ancestors' numbered frames but not their temporary
   ones.
-- **Bar**: a 44 px column on the left edge of every screen. Current frame
-  number on top (each screen's bar follows the workspace on that screen), the
-  rest of the roll as clickable digits below it, the environment title running
-  along the edge. At the bottom: launcher and clipboard buttons (vicinae),
-  the tray, the notification bell, the Wi-Fi/Bluetooth/sound/battery cluster
-  that opens quick settings, and a stacked clock. Hovering a button shows its
-  label beside the bar.
+- **Bar**: a 44 px column on the left edge of every screen. The roll's frame
+  numbers on top in slot order, the current one under a Pencil block that
+  slides between them (each screen's bar follows the workspace on that
+  screen); clicking another digit goes there, clicking the current one opens
+  the grid. The environment title runs along the edge with a Pencil lock when
+  the roll is locked. At the bottom, on one 28 px rhythm: launcher and
+  clipboard buttons (vicinae), the tray (icons drawn flat in Paper), the
+  notification bell, the Wi-Fi/Bluetooth/sound/battery cluster that opens
+  quick settings, and a stacked clock. Buttons lift onto an Emulsion wash on
+  hover and sink on press (120 ms); hovering shows a label beside the bar.
 - **Tray**: left click activates (or opens the menu of a menu-only item),
   right click opens the item's menu drawn as a sheet beside the bar (check and
   radio states, submenus with a back row), middle click is the secondary
@@ -53,6 +56,15 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
   disturb, which holds popups back but still fills the centre; critical
   notifications still pop. The server only runs when `popups` or `center` is
   enabled, so a bar beside DMS never takes `org.freedesktop.Notifications`.
+- **Sheets**: quick settings, the notification centre and tray menus are
+  sheets beside the bar. Their surfaces are created once and stay mapped with
+  an empty input region, so opening is a state change, not a new window: the
+  sheet rises from the bar edge (180 ms, ease out) and leaves faster
+  (110 ms). A press anywhere off the sheets and the bar closes them (a
+  transparent catcher surface, `ClickCatcher.qml`), so does Esc, and the bar
+  button that opened a sheet toggles it closed. `HNS_REDUCED_MOTION=1` makes
+  every transition instant. `HNS_PERF=1` logs open-to-first-frame, GUI-thread
+  stalls and frame intervals during slider drags (`PerfProbe.qml`).
 - **OSD**: a pill beside the bar for 1.5 s after the default sink's volume or
   mute changes (PipeWire events) or the backlight changes (inotify on the
   sysfs `brightness` file), on the focused screen.
@@ -124,17 +136,23 @@ shell/
   WorkspaceThumb.qml   live miniature of a workspace
   Glyph.qml            Nerd Font icon text
   Osd.qml              volume and brightness pill
-  services/            Hyprnav (daemon socket client), Audio, Brightness, Notifs, NightLight
-  switcher/  grid/  bar/  notifications/
+  ClickCatcher.qml     click-away for the sheets beside the bar
+  PerfProbe.qml        HNS_PERF=1 timing probe
+  CrossGlyph.qml       glyph that cross-fades when it changes
+  services/            Hyprnav (daemon socket client), Audio, Brightness, Notifs, NightLight, Sheets
+  bar/                 Bar, SheetWindow (shared sheet surface), QuickSettings, TrayMenu,
+                       Pressable (hover/press states), Slider, Toggle
+  switcher/  grid/  notifications/
   fonts/               Recursive (OFL), see LICENSE-Recursive.txt
 scripts/               lab.py, seed.sh, run.sh, record.sh, demo.sh, headless.sh,
                        grid-wrap-demo.sh, grid-scroll-demo.sh (grid layout clips),
                        sticking-test.sh, sticking-demo.sh (hyprnav hard-sticking checks),
                        agent-demo + agent-demo-app.py (GTK4 demo agent: countdown, then an approval dialog),
-                       tray-test.py (a StatusNotifierItem with a menu), bar-demo.sh (bar clip)
+                       tray-test.py (a StatusNotifierItem with a menu), bar-demo.sh (bar clip),
+                       bar-polish-demo.sh (control centre speed, click-away, motion)
 lab-tools/             nix expression for the lab compositor tools (self-contained):
                        cage, the virtual seat, hns-lab-scroll (pointer moves,
-                       clicks and wheel injection), wtype, wf-recorder
+                       clicks, drags and wheel injection), wtype, wf-recorder
 design/                direction and notes
 recordings/            mp4 output
 ```
