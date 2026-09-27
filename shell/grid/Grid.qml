@@ -26,6 +26,17 @@ PanelWindow {
     property string phase: "closed"   // closed | open | activating | closing
     property int selRow: 0
     property int selCol: 0
+    // The roll the selection is on, so it stays on that roll when the daemon
+    // reorders rows under an open grid (a lock toggle moves the locked roll
+    // to the top). Row objects are reused by position and only their envId
+    // changes, so `rows` itself does not notify; the order string does.
+    property string selEnv: ""
+    readonly property string rowOrder: rows.map(r => r.envId).join("\n")
+    onRowOrderChanged: {
+        const kept = selEnv ? rows.findIndex(r => r.envId === selEnv) : -1;
+        if (kept >= 0 && kept !== selRow) { selRow = kept; if (laid) ensureVisible(); }
+        selEnv = rows[selRow]?.envId ?? "";
+    }
     readonly property var rows: Services.Hyprnav.rows
     readonly property var selectedRow: rows[selRow] ?? null
     readonly property var selectedCell: selectedRow ? (selectedRow.cells[selCol]?.snapshot ?? null) : null
@@ -45,7 +56,7 @@ PanelWindow {
     // The user picked a cell since the open (keys, a moved pointer, the
     // palette): a late snapshot then keeps their choice. Set only by `pick()`.
     property bool userMoved: false
-    function pick(r, c) { selRow = r; selCol = c; userMoved = true; }
+    function pick(r, c) { selRow = r; selCol = c; selEnv = rows[r]?.envId ?? ""; userMoved = true; }
     // The frame the user is looking at. The focused workspace comes from
     // Hyprland's event stream, which is fresher than the snapshot's `active`
     // flags right after a switch. A shared frame shows in several rolls:
@@ -80,6 +91,7 @@ PanelWindow {
             pos = { r: r, c: it ? Math.max(0, it.column_index) : 0 };
         }
         selRow = pos.r; selCol = Math.max(0, Math.min(pos.c, (rs[pos.r]?.cells.length ?? 1) - 1));
+        selEnv = rs[pos.r]?.envId ?? "";
         userMoved = false;
     }
     // Hover selects only once the pointer has moved since the open (see
