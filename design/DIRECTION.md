@@ -75,25 +75,25 @@ other frame, with a small "shared" in Fixer after the name. The title is
 followed by a Pencil lock glyph when any level of the chain is locked, then
 the ancestors' names in Fixer ("in Proj › main").
 
-Bar: a 44 px column on the left edge, the film strip's edge. Top: the
-workspace selector, two groups shown at once. At the top, always, every
-workspace on the screen with an id from 1 to 99 in id order, the current one
-in a Pencil block, occupied ones in Paper, empty ones in Fixer; special and
-hyprnav-managed workspaces (100 and up) get no number. In the middle of the
-free space below it, only while hyprnav holds a lock, the locked roll: its
-initials in Casual above its frame numbers on a Pencil rail with a lock at
-its head, the grease-pencil mark along a chosen strip, and the frame on
-screen inverts. The two never share a row, so there is nothing to morph: the
-rail fades and grows in place when a lock appears (160 ms, ease out cubic)
-and shrinks away when it goes, and the list above never moves. The workspace
-on screen is marked in both groups when the roll holds it. Locking from the
-bar is a right-click on a number that is a roll's frame; clicking the
-initials or the lock unlocks. A list too long for the room scrolls on the
-wheel behind soft edges before the rail gives up space. No title along the
-edge: sideways text at bar width does not read; hovering the head names the
-roll.
-Bottom: tray, network,
-bluetooth, audio, battery, then the clock stacked HH over mm. Quick settings
+Bar: a 44 px column on the left edge, the film strip's edge, in three
+groups anchored on their own. Top, from the top edge: every workspace on the
+screen with an id from 1 to 99 in id order, the current one in a Pencil
+block, occupied ones in Paper, empty ones in Fixer; special and
+hyprnav-managed workspaces (100 and up) get no number. A list too long for
+the room above the middle scrolls on the wheel behind soft edges. Middle,
+centred and of constant height: launcher, clipboard, bell, the network,
+bluetooth, audio and battery cluster, and four reserved tray slots. Bottom,
+on the bottom edge: the clock stacked HH over mm, and above it, only while
+hyprnav holds a lock, the locked roll standing on a fixed baseline: its
+initials in dim Pencil Casual, a small Fixer lock, its frame numbers in the
+same pips as the top list, and a 2 px dim Pencil rule along its left edge,
+the grease-pencil mark along a chosen strip, drawn as a quiet line rather
+than a filled rail. It fades in place; frames coming and going move only its
+top. The workspace on screen is marked in both groups when the roll holds
+it. Locking from the bar is a right-click on a number that is a roll's
+frame; clicking the initials or the lock unlocks. No title along the edge:
+sideways text at bar width does not read; hovering the head names the roll.
+Quick settings
 open as one sheet beside the bar, bottom left.
 
 ## Motion

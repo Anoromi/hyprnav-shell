@@ -22,12 +22,13 @@ at() { "$P" --at "$1" "$2" >/dev/null 2>&1; }
 click() { "$P" --at "$1" "$2" --click "${3:-left}" >/dev/null 2>&1; }
 note() { notify-send -a "$1" "$2" "$3"; }
 BAR_X=22
-# Bar rows (y) from the bottom stack; see TESTING.md for how they were read.
-LAUNCHER_Y=${LAUNCHER_Y:-692}
-CLIP_Y=${CLIP_Y:-725}
-TRAY_Y=${TRAY_Y:-767}
-BELL_Y=${BELL_Y:-840}
-CLUSTER_Y=${CLUSTER_Y:-920}
+# Bar rows (y) in the middle group, centred on a 1080 px bar with a battery
+# (TESTING.md, "Three anchored groups"); the tray's first slot is TRAY_Y.
+LAUNCHER_Y=${LAUNCHER_Y:-361}
+CLIP_Y=${CLIP_Y:-393}
+TRAY_Y=${TRAY_Y:-612}
+BELL_Y=${BELL_Y:-438}
+CLUSTER_Y=${CLUSTER_Y:-525}
 
 profile_before=$(powerprofilesctl get)
 trap 'powerprofilesctl set "$profile_before" >/dev/null 2>&1 || true' EXIT

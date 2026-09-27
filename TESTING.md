@@ -567,10 +567,10 @@ either fixed or confined so it moves nothing anchored.
 
 | Shift | Where (before) | Fix |
 |---|---|---|
-| Locked rail moved when the workspace list grew or shrank | `bar/Bar.qml` `mid.y` = centre of the room below `topView` | the rail's head sits at `midTop`, a function of the bar height only (a four-frame roll centred on the bar; moved up only on a bar too short for it). The list above clips and scrolls at the head |
-| Rail moved when its own frame count changed (lock change, roll length) | same, `y` centred on its own height, with a `Behavior on y` | head fixed; the rail grows and shrinks downward only; the appear scale grows from the top (0.96 → 1) instead of the centre |
-| Rail moved when a tray icon appeared or left | `selBottom` fed the centring | the rail's anchor ignores the tray; a tray that grows into the rail's room only shortens the rail's scroll box |
-| Launcher, clipboard and bell moved up when tray icons appeared | tray group sat between them and the cluster | the tray is now the top group of the bottom stack; the stack hangs from the clock, so the tray grows upward into free space |
+| Locked rail moved when the workspace list grew or shrank | `bar/Bar.qml` `mid.y` = centre of the room below `topView` | first fixed with a head at a height-only `midTop`; since v4 (below) the roll stands on a baseline above the clock and the list clips and scrolls above the middle group, so the two never meet |
+| Rail moved when its own frame count changed (lock change, roll length) | same, `y` centred on its own height, with a `Behavior on y` | v4: the roll's bottom edge is fixed; frames coming and going move only its top edge. No scale or height animation, a 90 ms fade in place |
+| Rail moved when a tray icon appeared or left | `selBottom` fed the centring | v4: the tray has four reserved slots in the middle group, so an icon never changes any group's size |
+| Launcher, clipboard and bell moved up when tray icons appeared | tray group sat between them and the cluster | v4: the tray is the last row of the middle group, in four slots that stay reserved (its hairline fades instead of leaving the column); a fifth item scrolls inside the slots |
 | Control centre changed height per view (Wi-Fi 573, Bluetooth 525, sound 515 px; sheet top at y 498/546/556) | `QuickSettings.qml`, sheet height = `content.implicitHeight` | one view area of `Theme.qsViewH` (336 px, the Wi-Fi view's); Bluetooth's list box fills it; sound and brightness scroll inside it (`Flickable` + `ScrollEdges`) |
 | "Performance limited" line pushed the tab strip down | under the power profile row | moved to the end of the sound view, inside the fixed area |
 | Wi-Fi "Scan"/"Scanning" button changed width | header row | fixed to the width of "Scanning" |
@@ -636,6 +636,71 @@ Artifacts: `~/Artifacts/hyprnav-bar-stable.png` (before and after, side by
 side, cyan guides at the rail head and the sheet top) and
 `~/Artifacts/hyprnav-bar-stable.mp4` (35 s: lock change, workspaces added and
 removed, tray icon, every control centre view, notifications, centre).
+
+### Three anchored groups and a quiet lock (bar v4, 2026-09-27)
+
+The user found the locked roll "way too bright for no good reason" (a Pencil
+rail with every frame in an amber box) and wanted the normal workspaces at
+the top, settings in the centre and the lock at the bottom. The bar is now
+three groups, each anchored on its own, none reading another's size:
+
+| Group | Anchor | Grows |
+|---|---|---|
+| Top: workspaces 1–99 | `y = 12` (top edge) | downward; clips and scrolls (soft edges, wheel) at `middle.y − 16`, a function of the bar height only |
+| Middle: launcher, clipboard, bell, Wi-Fi, Bluetooth, volume, battery, tray | `y = round((barHeight − height) / 2)`; `height` is constant | never. The tray has four reserved slots (`traySlots`), filled from the top; its hairline fades rather than leaving the column. A fifth item scrolls inside the slots (the wheel handler exists only while they overflow, so otherwise the wheel reaches the item) |
+| Bottom: clock, and above it the locked roll | clock `bottom = barHeight − 12`; the roll's bottom edge 16 px above the clock | the roll upward only; with no lock its room stays empty. A roll taller than the room between the middle group and the baseline keeps its head and scrolls its frames |
+
+Why reserved slots rather than a tray growing symmetrically about the
+centre: symmetric growth still moves the launcher up and the cluster down by
+half a row per icon, and costs a centring binding that changes with the tray;
+four fixed slots cost 124 px of a 1080 px bar and move nothing. Most
+sessions have one to three tray items.
+
+Lock styling: the roll's frames are the same pips as the top list (Paper
+occupied, Fixer empty, the current one in the Pencil block with Darkroom
+digits, `Theme.hover` on hover). The one "locked" cue is a 2 px rule down
+the roll's left edge and the monogram (Casual Medium, 13 px) in one new
+token, `Theme.pencilDim` (#A0823C, Pencil at 60 % over Sheet); the lock
+glyph is 10 px Fixer at 70 %. No filled backgrounds. The stuck pin is Fixer.
+Right-click to lock on the top list, click a frame to go, click the head to
+unlock: unchanged. `Theme.tLock` and `Theme.tStagger` (the rail's grow
+animation) are gone.
+
+Walk: `scripts/bar-stable-check.sh` (new; the previous walk's script was not
+kept). Lab: `lab.py up`, `lab.py audio`, shell with `HNS_FAKE_WIFI=12
+HNS_FAKE_BT=6`, `agents` frames 1–5 on workspaces 1–5, `shell` frames 1–2 on
+6–7, kitty on 1, 2, 3, 5, 6, workspace 2 focused. One grim screenshot per
+state, then PIL: the first pip's crop, the middle group cut into its cells
+(from the base shot's ink rows) and each cell diffed against the base, the
+roll's rule measured by colour, the clock's ink bounds.
+
+| State | Top: first pip (y 12–40) | Middle cells differing from base | Roll rule y | Clock ink y |
+|---|---|---|---|---|
+| base, `agents` locked (5 frames) | — | — | 777–967 | 988–1063 |
+| lock `shell` (2 frames) | identical | none | 873–967 | 988–1063 |
+| lock cleared | identical | Wi-Fi* | no roll | 988–1063 |
+| `agents` locked again | identical | Wi-Fi* | 777–967 | 988–1063 |
+| +2 workspaces (8, 9) | identical | Wi-Fi* | 777–967 | 988–1063 |
+| +10 workspaces (list clips at 12, scrolls) | identical | Wi-Fi* | 777–967 | 988–1063 |
+| workspaces removed | identical | Wi-Fi* | 777–967 | 988–1063 |
+| tray icon arrives (`scripts/tray-test.py`) | identical | Wi-Fi*, tray slots (the icon in slot 1) | 777–967 | 988–1063 |
+| notification arrives | identical | bell (badge), Wi-Fi*, tray slots | 777–967 | 988–1063 |
+| tray icon leaves | identical | bell (badge still unread), Wi-Fi* | 777–967 | 988–1063 |
+
+\* The lab's fake Wi-Fi network drifts its signal every 700 ms
+(`FakeRadios.qml`), so the Wi-Fi glyph cross-fades between strength levels
+on its own; its cell's position is unchanged. Middle group region y 347–730
+on the 1080 px lab bar. The clock crop is pixel-identical until the minute
+ticked mid-walk; its ink bounds never moved. The roll's bottom edge is y 967
+in every state with a lock. No QML warnings in the run (apart from the lab's
+missing icon theme). Checked by hand in the lab: clicking roll frame 3 went
+to workspace 3, right-clicking workspace 6 in the top list locked `shell`,
+clicking the monogram unlocked, hover on a roll frame shows the Emulsion
+wash.
+
+Artifacts: `~/Artifacts/hyprnav-bar-v4.png` (the bar with a five-frame roll,
+1:1, bar plus 200 px), `~/Artifacts/hyprnav-bar-v4.mp4` (29 s, the walk above
+with captions, 2x).
 
 ## Memory containment for the lab (2026-09-27)
 

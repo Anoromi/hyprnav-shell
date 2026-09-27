@@ -11,6 +11,7 @@ Singleton {
     readonly property color emulsion: "#3A3733"
     readonly property color paper: "#EDE6DA"
     readonly property color pencil: "#F2C14E"
+    readonly property color pencilDim: "#A0823C"    // Pencil at 60 % on Sheet: quiet marks (the locked roll)
     readonly property color fixer: "#9A938A"
     readonly property color good: "#8FBF7F"
     readonly property color warn: "#E06C4B"
@@ -81,9 +82,6 @@ Singleton {
     readonly property int tFast: reducedMotion ? 0 : 90
     readonly property int tScrim: reducedMotion ? 0 : 120
     readonly property int tRise: reducedMotion ? 0 : 160
-    // Bar selector: the locked roll fading and growing in the middle.
-    readonly property int tLock: reducedMotion ? 0 : 160
-    readonly property int tStagger: reducedMotion ? 0 : 12
     // Switcher and grid: they sit on the path from a key press to the next
     // window, so they appear and leave in one short fade and nothing travels.
     readonly property int tSnap: reducedMotion ? 0 : 30
