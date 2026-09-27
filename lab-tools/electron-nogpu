@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 # Electron wrapper for the lab: software rendering only. The nested Cage
 # compositor has no GPU, and Electron with GPU compositing stalls there.
-exec /nix/store/g6b693wj5dc8jnd04mpy6i5fyap5l9i5-t3code-electron-43.4.1/bin/t3code-electron --disable-gpu --disable-gpu-compositing --disable-software-rasterizer=false "$@"
+exec /nix/store/g6b693wj5dc8jnd04mpy6i5fyap5l9i5-t3code-electron-43.4.1/bin/t3code-electron --disable-gpu --disable-gpu-compositing --disable-software-rasterizer=false --password-store=basic "$@"

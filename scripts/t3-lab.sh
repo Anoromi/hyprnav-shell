@@ -5,7 +5,7 @@
 # cua_repl points at the session-inheriting MCP launcher, and a private T3
 # home (lab/t3home). Auth files are copied from the real HOME on first run.
 #
-#   T3CODE_REPO=~/code/stolen/t3code scripts/t3-lab.sh up [project-dir]
+#   T3CODE_REPO=~/code/stolen/t3code [HNS_HYPRNAV_BIN=...] scripts/t3-lab.sh up [project-dir]
 #   scripts/t3-lab.sh down
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,6 +36,9 @@ keep["projects"] = {}
 json.dump(keep, open(dst, "w"), indent=2)
 PY
     # Toolchain from the live dev session's nix develop shell (pkg-config, libsecret, gcc).
+    # The captured env pins the live session's GPU Electron; keep the caller's
+    # choice (or the lab's software-rendering wrapper below) instead.
+    electron_path="${T3CODE_DESKTOP_ELECTRON_PATH_LAB:-$HERE/lab-tools/electron-nogpu}"
     [ -f "$HERE/lab/t3-buildenv.sh" ] && source "$HERE/lab/t3-buildenv.sh"
     export HOME="$LABHOME"
     export XDG_CONFIG_HOME="$LABHOME/.config" XDG_DATA_HOME="$LABHOME/.local/share" XDG_STATE_HOME="$LABHOME/.local/state" XDG_CACHE_HOME="$LABHOME/.cache"
@@ -47,11 +50,15 @@ PY
     export ELECTRON_ENABLE_LOGGING="${ELECTRON_ENABLE_LOGGING:-}"
     export HYPR_USE_HOST_NAME=claude
     # Same Electron and Node the live dev session uses (from its nix develop shell).
-    export T3CODE_DESKTOP_ELECTRON_PATH="${T3CODE_DESKTOP_ELECTRON_PATH:-$HERE/lab-tools/electron-nogpu}"
+    export T3CODE_DESKTOP_ELECTRON_PATH="$electron_path"
     export ELECTRON_SKIP_BINARY_DOWNLOAD=1
     # The nested lab compositor has no GPU; software rendering keeps Electron responsive.
     export ELECTRON_EXTRA_LAUNCH_ARGS="${ELECTRON_EXTRA_LAUNCH_ARGS:---disable-gpu --disable-gpu-compositing}"
     export PATH="/nix/store/g6b693wj5dc8jnd04mpy6i5fyap5l9i5-t3code-electron-43.4.1/bin:/nix/store/lfaydgacdyngci7p60s8wwvgdm74fjkx-nodejs-24.19.0/bin:$PATH"
+    # The captured env replaces PATH; a dev hyprnav (HNS_HYPRNAV_BIN, as given
+    # to lab.py up) has to come first again, or T3 talks to the lab daemon
+    # through the installed CLI.
+    if [ -n "${HNS_HYPRNAV_BIN:-}" ]; then export PATH="$(dirname "$(readlink -f "$HNS_HYPRNAV_BIN")"):$PATH"; fi
     # The embedded backend bootstraps the demo project as the first project.
     export T3CODE_DESKTOP_BACKEND_CWD="$PROJECT"
     export T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD=true
@@ -74,7 +81,9 @@ PY
     done
     sleep 4
     eval "$(python3 "$HERE/scripts/lab.py" env)"
-    for a in $(hyprctl clients -j | python3 -c 'import json,sys; [print(c["address"]) for c in json.load(sys.stdin) if c["title"].startswith("Developer Tools") or c["title"].startswith("Application Not Responding")]'); do hyprctl dispatch "hl.dsp.window.kill({ window = \"address:$a\" })" >/dev/null; done
+    # DevTools shares Electron's pid, so killing its window kills T3 (and the
+    # runner relaunches it next to an orphaned backend). Park it instead.
+    for a in $(hyprctl clients -j | python3 -c 'import json,sys; [print(c["address"]) for c in json.load(sys.stdin) if c["title"].startswith("Developer Tools")]'); do hyprctl dispatch "hl.dsp.window.move({ workspace = \"99\", follow = false, window = \"address:$a\" })" >/dev/null; done
     A=$(hyprctl clients -j | python3 -c 'import json,sys; l=[c["address"] for c in json.load(sys.stdin) if c["class"]=="t3-code-alpha"]; print(l[0] if l else "")')
     if [ -n "$A" ]; then hyprctl dispatch "hl.dsp.focus({ window = \"address:$A\" })" >/dev/null; sleep 0.5; "$HERE/lab-tools/result/bin/wtype" -M ctrl -k r -m ctrl; fi
     echo settled
