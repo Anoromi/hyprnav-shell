@@ -8,7 +8,9 @@ import Quickshell.Io
 import "../services" as Services
 import ".."
 
-// Environment grid: one roll per environment, one frame per slot.
+// Environment grid: one roll per leaf environment, one frame per slot. A
+// thread's roll carries its worktree's and project's frames too, tagged
+// "shared", instead of repeating them as rolls of their own.
 //
 // Like the switcher, the layer surface stays mapped (transparent, empty input
 // region, no keyboard) and opening flips opacity, input and focus. It opens
@@ -122,6 +124,12 @@ PanelWindow {
         if (row.locked) Services.Hyprnav.unlock(); else Services.Hyprnav.lock(row.envId);
     }
     Timer { id: finish; onTriggered: win.phase = "closed" }
+    // Thumbnails capture windows only while the overlay is up or fading out.
+    // Keyed to `open` and the fade timer rather than `phase`, so a phase left
+    // behind by an interrupted fade can never keep captures running unseen;
+    // a capture still bound when its window closes can take the shell's
+    // Wayland connection down.
+    readonly property bool capturing: open || finish.running
     // A roll can lose frames under the grid; keep the selection on a real cell
     // so the ring and the line arithmetic stay valid.
     onRowsChanged: {
@@ -327,25 +335,34 @@ PanelWindow {
                         // the ones below; never on open.
                         Behavior on y { enabled: win.open && content.opacity === 1; NumberAnimation { duration: Theme.tSnap; easing.type: Easing.OutCubic } }
 
+                        // Title, a lock when any level of the chain is locked, then
+                        // the ancestors it sits in: "in Proj › main".
                         Row {
+                            id: header
                             spacing: Theme.s12
                             height: win.titleH
+                            width: parent.width
                             Text {
+                                id: rowTitle
+                                width: Math.min(implicitWidth, header.width * 0.6)
+                                elide: Text.ElideRight
                                 text: rowItem.modelData.title
                                 color: rowItem.index === win.selRow ? Theme.paper : Theme.fixer
                                 font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
                             }
-                            Text {
+                            Glyph {
                                 visible: rowItem.modelData.locked
-                                anchors.baseline: parent.children[0].baseline
-                                text: "locked"
+                                anchors.verticalCenter: rowTitle.verticalCenter
+                                text: "󰌾"
+                                size: 15
                                 color: Theme.pencil
-                                font.family: Theme.sans; font.pixelSize: Theme.fs13
                             }
                             Text {
-                                visible: rowItem.modelData.displayId.indexOf(".") >= 0
-                                anchors.baseline: parent.children[0].baseline
-                                text: "inside " + rowItem.modelData.displayId.split(".").slice(0, -1).join(".")
+                                visible: rowItem.modelData.breadcrumb.length > 0
+                                anchors.baseline: rowTitle.baseline
+                                width: Math.min(implicitWidth, header.width - rowTitle.width - 60)
+                                elide: Text.ElideRight
+                                text: "in " + rowItem.modelData.breadcrumb.join(" › ")
                                 color: Theme.fixer
                                 font.family: Theme.sans; font.pixelSize: Theme.fs13
                             }
@@ -378,11 +395,11 @@ PanelWindow {
                                     width: win.cellW; height: win.cellH
                                     radius: Theme.rFrame
                                     color: cellItem.hasWindows ? Theme.sheet : Theme.emulsion
-                                    border.width: cellItem.cell.inherited || cellItem.cell.temporary ? 0 : 1
+                                    border.width: cellItem.cell.temporary ? 0 : 1
                                     border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, cellItem.hasWindows ? 0.35 : 0.12)
                                     Shape {
                                         anchors.fill: parent
-                                    visible: !!(cellItem.cell.inherited || cellItem.cell.temporary)
+                                        visible: cellItem.cell.temporary === true
                                         ShapePath {
                                             strokeColor: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.4)
                                             strokeWidth: 1
@@ -399,7 +416,7 @@ PanelWindow {
                                     WorkspaceThumb {
                                         anchors.fill: parent; anchors.margins: 3
                                         workspaceId: cellItem.cell.physical_workspace_id
-                                        live: win.phase !== "closed"
+                                        live: win.capturing
                                         emptyText: cellItem.hasWindows ? "" : (cellItem.cell.subtitle && cellItem.cell.subtitle.indexOf("Workspace") !== 0 ? "Opens " + cellItem.cell.subtitle : "Empty frame")
                                     }
                                     // Pin: a spawned process tree is stuck to this frame.
@@ -488,13 +505,23 @@ PanelWindow {
                                 Row {
                                     anchors.top: frame.bottom; anchors.topMargin: 7
                                     spacing: Theme.s8
+                                    readonly property bool shared: (cellItem.cell.shared ?? cellItem.cell.inherited) === true
                                     Text {
-                                        width: win.cellW - (cellItem.cell.active ? 50 : 0)
+                                        width: win.cellW - (cellItem.cell.active ? 50 : 0) - (parent.shared ? sharedTag.implicitWidth + Theme.s8 : 0)
                                         text: cellItem.agent ? ("agent: " + cellItem.agent.client) : cellItem.cell.unnumbered ? ("temporary" + (cellItem.cell.owner ? ", by " + cellItem.cell.owner : "")) : cellItem.cell.slot_display_name
                                         elide: Text.ElideRight
                                         color: cellItem.isSelected ? Theme.paper : Theme.fixer
                                         font.family: Theme.sans; font.pixelSize: Theme.fs13
                                         font.weight: cellItem.isSelected ? Font.Medium : Font.Normal
+                                    }
+                                    // The same workspace every roll under this ancestor shows.
+                                    Text {
+                                        id: sharedTag
+                                        visible: parent.shared
+                                        text: "shared"
+                                        color: Theme.fixer
+                                        opacity: 0.7
+                                        font.family: Theme.sans; font.pixelSize: Theme.fs12
                                     }
                                     Text {
                                         visible: cellItem.cell.active
@@ -639,14 +666,18 @@ PanelWindow {
             stdinEnabled: false
         }
     }
+    // Slot mutations go to the environment that binds the slot; a shared
+    // frame belongs to an ancestor. Going to a frame stays on the row's leaf,
+    // which resolves the same workspace and keeps the leaf's launch command.
+    function ownerOf(cell) { return cell.owner_environment_id || cell.binding_environment_id || cell.environment_id; }
     function runAction(action, text) {
         const cell = win.selectedCell; const row = win.selectedRow;
         switch (action.id) {
         case "open": win.activate(); break;
-        case "slot-remove": if (cell) Services.Hyprnav.slotRemove(cell.binding_environment_id || cell.environment_id, cell.slot_index); break;
-        case "slot-rename": if (cell) Services.Hyprnav.slotRename(cell.binding_environment_id || cell.environment_id, cell.slot_index, text.trim()); break;
-        case "slot-command": if (cell && text.trim()) Services.Hyprnav.slotCommandSet(cell.environment_id, cell.slot_index, Services.Hyprnav.splitArgv(text.trim())); break;
-        case "slot-command-clear": if (cell) Services.Hyprnav.slotCommandClear(cell.environment_id, cell.slot_index); break;
+        case "slot-remove": if (cell) Services.Hyprnav.slotRemove(win.ownerOf(cell), cell.slot_index); break;
+        case "slot-rename": if (cell) Services.Hyprnav.slotRename(win.ownerOf(cell), cell.slot_index, text.trim()); break;
+        case "slot-command": if (cell && text.trim()) Services.Hyprnav.slotCommandSet(win.ownerOf(cell), cell.slot_index, Services.Hyprnav.splitArgv(text.trim())); break;
+        case "slot-command-clear": if (cell) Services.Hyprnav.slotCommandClear(win.ownerOf(cell), cell.slot_index); break;
         case "stick-release": if (cell) Services.Hyprnav.stickRelease(cell.physical_workspace_id); break;
         case "close-all": if (cell) withWindowsOn(cell.physical_workspace_id, list => { for (const a of list) dispatch("hl.dsp.window.kill({ window = \"address:" + a + "\" })"); }); break;
         case "move-windows": {

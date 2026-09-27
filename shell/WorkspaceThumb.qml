@@ -44,6 +44,21 @@ Item {
             // IPC object on every refresh, and re-reading `wayland` through it
             // would restart the capture for nothing.
             readonly property var wayland: modelData.wayland
+            // Hyprland's `closewindow` reaches us on the IPC socket before the
+            // toplevel's `closed` is handled on the Wayland connection. Drop
+            // the capture right then: a live capture that re-arms on a closed
+            // toplevel sends a request on an object the compositor already
+            // destroyed, and that is a fatal protocol error ("invalid object")
+            // that takes the whole shell down.
+            readonly property string address: String(modelData.address).replace(/^0x/, "")
+            property bool gone: false
+            Connections {
+                target: Hyprland
+                enabled: root.live && !winItem.gone
+                function onRawEvent(ev) {
+                    if (ev.name === "closewindow" && ev.data.replace(/^0x/, "") === winItem.address) winItem.gone = true;
+                }
+            }
             readonly property var o: modelData.lastIpcObject
             readonly property bool placed: !!(o && o.at && o.size)
             x: placed ? root.ox + (o.at[0] - root.bbox.x) * root.fit : 0
@@ -62,8 +77,8 @@ Item {
                     // toplevel that closes while bound kills the Wayland connection.
                     // Rebinding this restarts the capture and blanks the frame,
                     // so it changes only when the window itself does.
-                    captureSource: root.live ? winItem.wayland : null
-                    live: root.live
+                    captureSource: root.live && !winItem.gone ? winItem.wayland : null
+                    live: root.live && !winItem.gone
                     paintCursor: false
                 }
                 IconImage {

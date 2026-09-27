@@ -13,9 +13,15 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
   Tab / Shift+Tab step, Enter opens, Esc cancels, digits jump. Temporary
   workspaces are left out: they are neither a card nor a stop in the cycling
   order, so Alt-Tab never lands on one.
-- **Grid**: every hyprnav environment as a roll, every slot as a frame with a
-  live thumbnail. Arrows or hjkl move, Enter opens, Shift+L locks the roll,
-  digits open that frame, Esc closes. Inherited slots have a dashed frame.
+- **Grid**: one roll per leaf hyprnav environment, every slot as a frame with a
+  live thumbnail. A thread and its worktree and project are one roll, not
+  three: the ancestors' frames come first with a small "shared" tag (they are
+  the same workspaces in every thread under that worktree), then the thread's
+  own. The header is the deepest title on the chain, a lock glyph when any
+  level is locked, then the ancestors' names muted ("in Proj › main"); raw
+  environment ids only when nothing else names the roll. Palette slot
+  actions go to the environment that binds the slot. Arrows or hjkl move,
+  Enter opens, Shift+L locks the roll, digits open that frame, Esc closes.
   A roll wider than the window wraps onto further lines of the same roll;
   left and right walk it in reading order across a line break, up and down
   move between lines and leave the roll only from its first or last line,
@@ -26,8 +32,8 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
   edges mark a side that still has content behind it and a hair on the right
   shows the position. A stack that fits is centred as before. A temporary slot sits at
   the end of the roll of the environment that owns it, and nowhere else: a
-  child roll inherits its ancestors' numbered frames but not their temporary
-  ones.
+  child roll shows its ancestors' numbered frames but not their temporary
+  ones. An ancestor that owns a temporary slot keeps a roll of its own.
 - **Bar**: a 44 px column on the left edge of every screen. The workspace
   selector is two groups, both pure functions of state (each screen's bar
   follows the workspace on that screen). At the top, always: every Hyprland

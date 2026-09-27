@@ -69,6 +69,7 @@ PanelWindow {
         if (kept.length === 0) return false;
         selected = initialIndex(res, reverse, kept);
         perf.arm("open");
+        finish.stop();
         phase = "open"; open = true;
         keys.forceActiveFocus();
         return true;
@@ -76,7 +77,10 @@ PanelWindow {
     function show(reverse, held) {
         if (phase === "open") { step(reverse ? -1 : 1); return; }
         if (perf.enabled) console.info("[perf] switcher show() at " + Date.now());
-        finish.stop();
+        // Stop a running fade only by presenting (see present()). Stopping it
+        // here left the phase at "activating" or "cancelling" whenever no
+        // snapshot presented, and the thumbnails kept capturing windows with
+        // the switcher out of sight until one of them closed.
         const id = ++request;
         userMoved = false; commitPending = false;
         hold = !!held;
@@ -146,6 +150,12 @@ PanelWindow {
         finish.restart();
     }
     Timer { id: finish; onTriggered: win.phase = "closed" }
+    // Thumbnails capture windows only while the overlay is up or fading out.
+    // Keyed to `open` and the fade timer rather than `phase`, so a phase left
+    // behind by an interrupted fade can never keep captures running unseen;
+    // a capture still bound when its window closes can take the shell's
+    // Wayland connection down.
+    readonly property bool capturing: open || finish.running
     PerfProbe { id: perf; label: "switcher" }
     FocusRelease { id: afterRelease }
     // A background refresh can reorder the list under an open switcher; keep
@@ -236,7 +246,7 @@ PanelWindow {
                         anchors.fill: parent; anchors.margins: 3
                         workspaceId: card.modelData.workspace_id
                         fallbackClass: card.modelData.app_class
-                        live: win.phase !== "closed"
+                        live: win.capturing
                     }
                     Glyph {
                         anchors.right: parent.right; anchors.top: parent.top

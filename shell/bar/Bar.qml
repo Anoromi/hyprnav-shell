@@ -162,9 +162,16 @@ PanelWindow {
     // row flag covers the moment before the first status reply.
     readonly property string lockEnv: Services.Hyprnav.lockedEnv !== "" ? Services.Hyprnav.lockedEnv
         : (Services.Hyprnav.rows.find(r => r.locked)?.envId ?? "")
-    readonly property var lockedRoll: lockEnv !== "" ? (Services.Hyprnav.rows.find(r => r.envId === lockEnv) ?? null) : null
+    // A locked worktree has no row of its own when its threads have frames:
+    // its frames show, shared, in each thread's row. Take the first row on
+    // the lock's chain and keep only the frames the locked environment
+    // resolves itself (bound by it or an ancestor).
+    readonly property var lockedRoll: lockEnv !== "" ? (Services.Hyprnav.rows.find(r => r.envId === lockEnv)
+        ?? Services.Hyprnav.rows.find(r => r.chainIds.includes(lockEnv)) ?? null) : null
+    readonly property var lockChain: lockedRoll ? lockedRoll.chainIds.slice(0, lockedRoll.chainIds.indexOf(lockEnv) + 1) : []
     readonly property var rollItems: (lockedRoll ? lockedRoll.cells : [])
         .map(c => c.snapshot).filter(f => f && !f.unnumbered)
+        .filter(f => !lockedRoll || lockedRoll.envId === lockEnv || lockChain.includes(f.owner_environment_id || f.binding_environment_id))
         .map(f => ({
             label: String(f.slot_index),
             current: focusedWs !== null && f.physical_workspace_id === focusedWs.id,
@@ -178,7 +185,8 @@ PanelWindow {
     function syncRail() {
         if (!hasLock || !lockedRoll) return;
         railItems = rollItems; railEnv = lockEnv;
-        railTitle = lockedRoll.title || lockedRoll.displayId || lockEnv;
+        const at = lockedRoll.envId === lockEnv ? -1 : lockedRoll.chainIds.indexOf(lockEnv);
+        railTitle = (at >= 0 ? lockedRoll.chainLabels[at] : "") || lockedRoll.title || lockedRoll.displayId || lockEnv;
     }
     onRollItemsChanged: syncRail()
     Component.onCompleted: syncRail()

@@ -473,3 +473,56 @@ which does not exist (the enum has `Open`). The lock glyph showed on every
 network, and an open network asked for a password. They now use `Open`.
 
 Recording: `recordings/hyprnav-cc-lists.mp4` (`scripts/cc-lists-demo.sh`), 27 s.
+
+## Merged rolls for nested environments (2026-09-27)
+
+A thread (`p.x.w.a.t`) resolves slots through its worktree (`p.x.w`) and
+project (`p.x`), so the worktree's frames are the same workspaces in every
+thread. The grid showed the worktree and each thread as separate rolls with
+the same thumbnails twice. The daemon now emits one row per leaf environment
+(rule in the hyprnav README, "grid"); the shell draws it with shared frames
+tagged, a lock glyph and a breadcrumb. Lab: own worktree and lab instance
+(`HNS_HYPRNAV_BIN` = the nix build of the daemon change),
+`scripts/grid-merged-demo.sh seed|record`.
+
+| Check | How | Result |
+|---|---|---|
+| Rows | `ui_snapshot_grid` over the socket after seeding `p.x` "Proj", untitled `p.x.w` with 1–3, `p.x.w.a.t` "Design Hypernav Workspace UI" with 5, 8, `p.x.w.b.t` "Other" with 4 | two rows: `p.x.w.a.t` = 1, 2, 3 shared (owner `p.x.w`), 5, 8 own; `p.x.w.b.t` = 1, 2, 3 shared, 4 own. No `p.x.w` row |
+| Header | screenshot | "Design Hypernav Workspace UI", lock glyph, "in Proj"; "Other", lock glyph, "in Proj". The untitled worktree is not in the breadcrumb and no id is shown |
+| Lock on an ancestor | `hyprnav lock p.x.w` | both rows carry the lock glyph (`locked_environment_id` = `p.x.w`); the bar's rail lists the worktree's frames 1–3 only (an untitled worktree has no monogram) |
+| Cells | screenshot, clip | shared frames are ordinary frames with "shared" after the name, no dashed border; "here" and the ring as before |
+| Enter | Enter on "Other" frame 4 | switches to workspace 4 through the leaf |
+| Refresh path | unchanged | rows still rebuild from the event-driven snapshot; nothing polls |
+
+Recording: `recordings/grid-merged.mp4`, 15 s.
+
+### A shell crash on a closing window (2026-09-27)
+
+The live shell died at 10:27:31 with `wl_display#1: error 0: invalid object
+185`, a fatal Wayland error, about five minutes after it started. Its log
+shows six window captures (`screencast>>1,window`) starting together and not
+one of them stopping for four minutes, with no workspace or focus event in
+between; then Cursor's window closed, its capture stopped, and the connection
+died. So the thumbnails were capturing with no overlay in sight, and a
+capture still bound to a window that closes is exactly how this error
+happens (see "Hard sticking" above).
+
+Fixes:
+
+1. `WorkspaceThumb` drops a window's capture when Hyprland's `closewindow`
+   for that address arrives on the IPC socket, which comes before the
+   toplevel's `closed` on the Wayland connection.
+2. The grid and switcher thumbnails capture while `open || finish.running`
+   (open or fading out) instead of `phase !== "closed"`, so a phase left
+   behind can no longer keep captures alive unseen.
+3. `Switcher.show()` stopped the fade timer before it knew whether it would
+   present. If nothing presented (no cached snapshot, and a refresh that was
+   superseded or empty), the phase stayed at "activating" or "cancelling"
+   for good, with every thumbnail capturing. The timer is now stopped only
+   by `present()`.
+
+In the lab, with the grid open, killing two captured kitty windows left the
+shell running with each fix in place; the unfixed thumbnail did not crash
+either, so the close race does not reproduce on demand and (3) is the likely
+cause found by reading, not a reproduced one. Opening and closing the grid
+and the switcher starts four captures and stops all four at close.

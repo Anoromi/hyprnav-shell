@@ -69,8 +69,11 @@ Grid (environments):
 ```
 Rows are rolls: title on the left in Casual, then frames. Frame number sits
 inside the frame's top-left corner like a film edge marking. Empty slots are
-Emulsion fill with the launch command name in Fixer. Inherited slots have a
-dashed border. The locked roll has a small Pencil tick after its title.
+Emulsion fill with the launch command name in Fixer. A roll is a leaf
+environment; frames it shares with its ancestors come first, drawn like any
+other frame, with a small "shared" in Fixer after the name. The title is
+followed by a Pencil lock glyph when any level of the chain is locked, then
+the ancestors' names in Fixer ("in Proj › main").
 
 Bar: a 44 px column on the left edge, the film strip's edge. Top: the
 workspace selector, two groups shown at once. At the top, always, every

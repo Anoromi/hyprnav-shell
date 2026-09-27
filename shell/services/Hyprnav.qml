@@ -217,18 +217,21 @@ Singleton {
     // rolls always gets the same names.
     readonly property var monograms: {
         const skip = ["a", "an", "and", "the", "of", "for", "to", "in", "on", "with", "at", "by", "or"];
-        const base = {};
-        for (const r of rows) {
-            const title = r.title || r.displayId || r.envId || "";
+        const codeOf = title => {
             const all = title.split(/[^A-Za-z0-9\u00C0-\uFFFF]+/).filter(w => w.length > 0);
             const words = all.filter(w => !skip.includes(w.toLowerCase()));
             const use = words.length > 0 ? words : all;
-            let code = "";
-            if (use.length >= 2) code = (use[0][0] + use[1][0]).toUpperCase();
-            else if (use.length === 1) code = use[0][0].toUpperCase() + (use[0].length > 1 ? use[0][1].toLowerCase() : "");
-            else code = "?";
-            base[r.envId] = code;
-        }
+            if (use.length >= 2) return (use[0][0] + use[1][0]).toUpperCase();
+            if (use.length === 1) return use[0][0].toUpperCase() + (use[0].length > 1 ? use[0][1].toLowerCase() : "");
+            return "?";
+        };
+        const base = {};
+        for (const r of rows) base[r.envId] = codeOf(r.title || r.displayId || r.envId || "");
+        // Ancestors merged into their descendants' rows can still hold the
+        // lock; name them by their own label.
+        for (const r of rows) r.chainIds.forEach((id, i) => {
+            if (!(id in base) && r.chainLabels[i]) base[id] = codeOf(r.chainLabels[i]);
+        });
         const groups = {};
         for (const id in base) (groups[base[id]] = groups[base[id]] || []).push(id);
         const out = {};
@@ -257,6 +260,16 @@ Singleton {
 
     function _cellKey(c) { return c.row_index + "/" + c.slot_index + "/" + c.physical_workspace_id; }
 
+    // The labels of the levels above the one that names the row, root first.
+    // When no level names it (the title is the leaf's id), every labelled
+    // level above the leaf.
+    function _breadcrumb(chain, title) {
+        let at = -1;
+        for (let i = chain.length - 1; i >= 0; i--) if (chain[i].label && chain[i].label === title) { at = i; break; }
+        const upTo = at >= 0 ? at : chain.length - 1;
+        return chain.slice(0, upTo).map(l => l.label).filter(l => !!l);
+    }
+
     function _syncRows() {
         const byRow = {};
         const order = [];
@@ -284,6 +297,14 @@ Singleton {
             row.title = head.environment_title;
             row.displayId = head.environment_display_id;
             row.locked = head.environment_locked;
+            row.lockedEnvId = head.locked_environment_id || "";
+            const chain = head.environment_chain || [];
+            const ids = chain.map(l => l.id);
+            if (JSON.stringify(ids) !== JSON.stringify(row.chainIds)) row.chainIds = ids;
+            const labels = chain.map(l => l.label || "");
+            if (JSON.stringify(labels) !== JSON.stringify(row.chainLabels)) row.chainLabels = labels;
+            const crumbs = _breadcrumb(chain, head.environment_title);
+            if (JSON.stringify(crumbs) !== JSON.stringify(row.breadcrumb)) row.breadcrumb = crumbs;
 
             const keys = items.map(_cellKey);
             let sameCells = keys.length === row.cells.length;
@@ -340,7 +361,7 @@ Singleton {
         for (const c of grid.items) {
             if (c.physical_workspace_id !== ws) continue;
             if (c.active) return c;
-            if (!c.inherited && !own) own = c;
+            if (!(c.shared ?? c.inherited) && !own) own = c;
             if (!any) any = c;
         }
         return own ?? any;
