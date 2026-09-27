@@ -5,14 +5,22 @@ Cage (headless wlroots) hosts a nested Hyprland with a headless TEST output at
 1920x1080. The nested session has its own runtime dir, D-Bus, hyprnav daemon
 and state, so nothing touches the live desktop. Commands:
 
-  lab.py up        start everything and print the env file
-  lab.py down      stop everything
+  lab.py up [--memory-max 16G] [--no-scope]
+                   start everything and print the env file
+  lab.py down      stop everything, then the lab's systemd scope
+  lab.py status    the scope's memory use
   lab.py env       print `export` lines for the nested session
-  lab.py exec CMD  run CMD inside the nested session
+  lab.py exec CMD  run CMD inside the nested session (and the lab's scope)
   lab.py audio     start a private PipeWire + WirePlumber with one null sink
                    inside the lab, so volume checks never touch the host
+
+`up` re-runs itself under `systemd-run --user --scope` with a memory cap
+(default 16G, or HNS_LAB_MEMORY_MAX), so the lab and everything it starts
+sit in a scope of their own instead of the caller's. A leak is OOM-killed
+inside the lab and the caller survives. Without a reachable systemd user
+manager the lab runs unscoped.
 """
-import json, os, shlex, signal, subprocess, sys, tempfile, time
+import json, os, shlex, shutil, signal, subprocess, sys, tempfile, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -22,7 +30,85 @@ TOOLS = ROOT / "lab-tools/result/bin"   # built by: nix-build lab-tools -o lab-t
 CAGE = TOOLS / "cage"
 PIDS = LAB / "pids.json"
 ENVF = LAB / "env.json"
+SCOPEF = LAB / "scope.json"
 OUTPUT = "TEST"
+DEFAULT_MEMORY_MAX = "16G"
+
+def systemd_user_available():
+    if not shutil.which("systemd-run") or not shutil.which("systemctl"):
+        return False
+    try:
+        r = subprocess.run(["systemctl", "--user", "show", "-p", "Version", "--value"],
+                           capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0 and bool(r.stdout.strip())
+
+def own_cgroup():
+    try:
+        return next(l[3:] for l in Path("/proc/self/cgroup").read_text().splitlines() if l.startswith("0::"))
+    except (OSError, StopIteration):
+        return ""
+
+def scope_unit():
+    try:
+        return json.loads(SCOPEF.read_text()).get("unit")
+    except (OSError, ValueError):
+        return None
+
+def scope_show(unit):
+    r = subprocess.run(["systemctl", "--user", "show", unit, "-p", "ActiveState", "-p", "MemoryCurrent",
+                        "-p", "MemoryPeak", "-p", "MemoryMax", "-p", "TasksCurrent"], capture_output=True, text=True)
+    return dict(l.split("=", 1) for l in r.stdout.splitlines() if "=" in l)
+
+def enter_scope(argv):
+    """Re-exec `up` inside a capped transient scope; returns when scoping is off.
+
+    OOMPolicy=continue: the kernel kills the biggest process and the rest of
+    the lab keeps running. Delegate=yes lets `exec` and `audio` join later.
+    """
+    memory_max = os.environ.get("HNS_LAB_MEMORY_MAX", DEFAULT_MEMORY_MAX)
+    rest = []
+    it = iter(argv)
+    for a in it:
+        if a == "--memory-max": memory_max = next(it)
+        elif a.startswith("--memory-max="): memory_max = a.split("=", 1)[1]
+        elif a == "--no-scope": return
+        else: rest.append(a)
+    if os.environ.get("HNS_LAB_SCOPE"):
+        return
+    if not systemd_user_available():
+        print("lab.py: no systemd user manager; the lab runs without a memory scope", file=sys.stderr)
+        return
+    unit = f"hns-lab-{os.getpid()}.scope"
+    cmd = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit", unit,
+           "--description", f"hyprnav-shell lab {LAB}",
+           "-p", f"MemoryMax={memory_max}", "-p", "MemorySwapMax=0", "-p", "TasksMax=4096",
+           "-p", "OOMPolicy=continue", "-p", "Delegate=yes",
+           sys.executable, str(Path(__file__).resolve()), "up", *rest]
+    sys.stdout.flush()
+    os.execvpe(cmd[0], cmd, dict(os.environ, HNS_LAB_SCOPE=unit, HNS_LAB_MEMORY_MAX=memory_max))
+
+def join_scope():
+    """Move this process into the lab's scope, so what it starts counts against the lab."""
+    unit = scope_unit()
+    if not unit or own_cgroup().endswith("/" + unit):
+        return
+    if scope_show(unit).get("ActiveState") != "active":
+        return
+    r = subprocess.run(["busctl", "--user", "call", "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager", "AttachProcessesToUnit", "ssau", unit, "", "1",
+                        str(os.getpid())], capture_output=True, text=True)
+    if r.returncode:
+        print(f"lab.py: could not join {unit}: {r.stderr.strip()}", file=sys.stderr)
+
+def stop_scope():
+    unit = scope_unit()
+    if unit:
+        inside = own_cgroup().endswith("/" + unit)
+        subprocess.run(["systemctl", "--user", "stop", unit] + (["--no-block"] if inside else []),
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    SCOPEF.unlink(missing_ok=True)
 
 def load_env():
     return json.loads(ENVF.read_text())
@@ -43,11 +129,15 @@ def wait(check, p, what, tries=150):
         time.sleep(0.1)
     raise RuntimeError(f"{what}: timeout")
 
-def up():
+def up(argv=()):
     if not CAGE.exists():
         raise SystemExit("lab tools missing: run  nix-build lab-tools -o lab-tools/result")
+    enter_scope(list(argv))
     if PIDS.exists():
         down()
+    unit = os.environ.get("HNS_LAB_SCOPE")
+    if unit:
+        SCOPEF.write_text(json.dumps({"unit": unit, "memory_max": os.environ.get("HNS_LAB_MEMORY_MAX")}) + "\n")
     runtime = Path(tempfile.mkdtemp(prefix="hns-lab-"))
     env = {k: os.environ[k] for k in ("PATH", "XDG_DATA_DIRS", "LD_LIBRARY_PATH", "HOME", "USER", "LANG", "SHELL", "TERM") if k in os.environ}
     env.update(
@@ -173,7 +263,8 @@ hl.window_rule({{
         env["PATH"] = f"{xdph}/bin:" + env["PATH"]
     nav = launch("hyprnav", [hyprnav_bin, "daemon"], env, procs)
     time.sleep(0.8)
-    print(json.dumps({"runtime": str(runtime), "instance": env["HYPRLAND_INSTANCE_SIGNATURE"], "pids": procs}, indent=2))
+    print(json.dumps({"runtime": str(runtime), "instance": env["HYPRLAND_INSTANCE_SIGNATURE"], "pids": procs,
+                      "scope": unit}, indent=2))
     print(hc("monitors"))
 
 def audio():
@@ -183,6 +274,7 @@ def audio():
     env = load_env()
     runtime = env["XDG_RUNTIME_DIR"]
     procs = json.loads(PIDS.read_text())
+    join_scope()
     if "pipewire" in procs:
         try:
             os.kill(procs["pipewire"], 0); print("lab audio already running"); return
@@ -226,6 +318,7 @@ def audio():
 
 def down():
     if not PIDS.exists():
+        stop_scope()
         print("not running"); return
     procs = json.loads(PIDS.read_text())
     for name, pid in reversed(list(procs.items())):
@@ -240,16 +333,29 @@ def down():
         except ProcessLookupError:
             pass
     PIDS.unlink()
+    # Whatever escaped the process groups (reparented helpers) dies with the scope.
+    stop_scope()
     print("stopped")
+
+def status():
+    unit = scope_unit()
+    if not unit:
+        print("scope: none" + ("" if PIDS.exists() else " (lab not running)")); return
+    props = scope_show(unit)
+    fmt = lambda v: f"{int(v) / (1 << 30):.2f}G" if v and v.isdigit() else (v or "-")
+    print(f"scope: {unit} {props.get('ActiveState', 'unknown')} memory={fmt(props.get('MemoryCurrent'))}"
+          f"/{fmt(props.get('MemoryMax'))} peak={fmt(props.get('MemoryPeak'))} tasks={props.get('TasksCurrent', '-')}")
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "up"
-    if cmd == "up": up()
+    if cmd == "up": up(sys.argv[2:])
     elif cmd == "down": down()
+    elif cmd == "status": status()
     elif cmd == "env":
         for k, v in load_env().items(): print(f"export {k}={shlex.quote(v)}")
     elif cmd == "audio": audio()
     elif cmd == "exec":
+        join_scope()
         os.execvpe(sys.argv[2], sys.argv[2:], load_env())
     else:
         print(__doc__)

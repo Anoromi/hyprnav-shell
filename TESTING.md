@@ -526,3 +526,24 @@ shell running with each fix in place; the unfixed thumbnail did not crash
 either, so the close race does not reproduce on demand and (3) is the likely
 cause found by reading, not a reproduced one. Opening and closing the grid
 and the switcher starts four captures and stops all four at close.
+
+## Memory containment for the lab (2026-09-27)
+
+An 84 GB `python3` inside T3 Code's systemd scope set off the kernel OOM
+killer. The scope failed (`OOMPolicy=stop`) and T3 went down with it. Before
+this change, lab processes started from an agent thread lived in that same
+scope. `lab.py up` now re-runs itself under `systemd-run --user --scope` with
+MemoryMax=16G, no swap, and OOMPolicy=continue.
+
+Checked in a worktree with its own `lab/`: `lab.py up`,
+`lab.py exec scripts/run.sh start`, `lab.py audio`. The scope
+`hns-lab-<pid>.scope` held cage, its `sleep`, D-Bus, Hyprland, the seat, both
+portals and their helpers, the hyprnav daemon and `hyprnav-capture`,
+Quickshell, PipeWire and WirePlumber, and nothing else. `lab.py status` showed
+`memory=0.16G/16.00G`. A 17 GB `bytearray` run through `lab.py exec` was
+OOM-killed (exit 137), and the journal logged the kill against the lab scope
+(peak 16.00G). The shell that started it, the calling agent, and every lab
+process kept running, and `hyprctl monitors` still answered. `lab.py down`
+removed the scope, including Quickshell, which is not in `pids.json` and
+previously survived `down`.
+
