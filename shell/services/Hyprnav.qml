@@ -179,10 +179,10 @@ Singleton {
     property bool keepSwitcherWarm: false
     onKeepSwitcherWarmChanged: if (keepSwitcherWarm && connected) refreshSwitcher(false)
     function refreshStatus() { request("status_get", { cwd: null }, res => { if (res) status = res; }); }
-    function gotoSlot(env, slot, cb) { request("workspace_goto", { env: env, slot: slot }, (r, e) => { refreshDebounce.restart(); if (cb) cb(r, e); }); }
+    function gotoSlot(env, slot, cb) { request("workspace_goto", { env: env, slot: slot, origin: "hyprnav-shell" }, (r, e) => { refreshDebounce.restart(); if (cb) cb(r, e); }); }
     function gotoPhysical(ws, cb) { request("workspace_goto_physical", { workspace_id: ws }, (r, e) => { refreshDebounce.restart(); if (cb) cb(r, e); }); }
-    function lock(env, cb) { request("lock_set", { env: env }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
-    function unlock(cb) { request("lock_clear", {}, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
+    function lock(env, cb) { request("lock_set", { env: env, origin: "hyprnav-shell" }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
+    function unlock(cb) { request("lock_clear", { origin: "hyprnav-shell" }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
 
     // Slot and environment mutations used by the grid palette.
     function slotTempCreate(env, name, cb) { request("slot_temp_create", { env: env, cwd: null, name: name || null, owner: "grid", client: null, launch_argv: null }, (r, e) => { refreshAll(); if (cb) cb(r, e); }); }
