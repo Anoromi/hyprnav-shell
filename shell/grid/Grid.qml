@@ -335,8 +335,8 @@ PanelWindow {
                         // the ones below; never on open.
                         Behavior on y { enabled: win.open && content.opacity === 1; NumberAnimation { duration: Theme.tSnap; easing.type: Easing.OutCubic } }
 
-                        // Title, a lock when any level of the chain is locked, then
-                        // the ancestors it sits in: "in Proj › main".
+                        // Title, the ancestors it sits in ("in Proj › main"), then a
+                        // lock when any level of the chain is locked.
                         Row {
                             id: header
                             spacing: Theme.s12
@@ -350,13 +350,6 @@ PanelWindow {
                                 color: rowItem.index === win.selRow ? Theme.paper : Theme.fixer
                                 font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
                             }
-                            Glyph {
-                                visible: rowItem.modelData.locked
-                                anchors.verticalCenter: rowTitle.verticalCenter
-                                text: "󰌾"
-                                size: 15
-                                color: Theme.pencil
-                            }
                             Text {
                                 visible: rowItem.modelData.breadcrumb.length > 0
                                 anchors.baseline: rowTitle.baseline
@@ -365,6 +358,15 @@ PanelWindow {
                                 text: "in " + rowItem.modelData.breadcrumb.join(" › ")
                                 color: Theme.fixer
                                 font.family: Theme.sans; font.pixelSize: Theme.fs13
+                            }
+                            // Last in the row, so locking or unlocking (Shift+L)
+                            // never slides the breadcrumb sideways.
+                            Glyph {
+                                visible: rowItem.modelData.locked
+                                anchors.verticalCenter: rowTitle.verticalCenter
+                                text: "󰌾"
+                                size: 15
+                                color: Theme.pencil
                             }
                         }
 

@@ -66,9 +66,14 @@ Singleton {
     readonly property int listGap: 4
     function listBox(rows, rowHeight) { return rows * rowHeight + (rows - 1) * listGap; }
     readonly property int wifiListH: listBox(7, rowH)          // 304
-    readonly property int btListH: listBox(5, rowH)            // 216
     readonly property int sinkListH: listBox(3, rowCompactH)   // 110
     readonly property int centerListH: 560                     // about eight compact cards
+    // The control centre's view area (Wi-Fi, Bluetooth, sound and brightness)
+    // is one fixed height, the tallest view's: the Wi-Fi header and its list.
+    // Switching views never resizes the sheet; a view with more content
+    // scrolls inside the area.
+    readonly property int qsHeaderH: 28
+    readonly property int qsViewH: qsHeaderH + s4 + wifiListH  // 336
     readonly property int listFadeH: 32
 
     // Motion

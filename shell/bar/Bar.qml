@@ -131,14 +131,19 @@ PanelWindow {
     // and never moves; when it is taller than the room left it clips and
     // scrolls on the wheel, with soft edges.
     //
-    // In the middle of the free space between that group and the bottom
-    // cluster, only while hyprnav holds a lock: the locked roll's monogram
-    // over its numbered frames on a Pencil rail with a lock at its head,
-    // digits Darkroom, the frame on screen inverted to a Darkroom block. It
-    // fades and grows in place when a lock appears and shrinks away when it
-    // goes (160 ms, ease out cubic). Clicking a frame goes there, clicking
-    // the monogram or the lock unlocks. The workspace on screen can show in
-    // both groups and is marked in both.
+    // At a fixed place near the middle of the bar, only while hyprnav holds
+    // a lock: the locked roll's monogram over its numbered frames on a Pencil
+    // rail with a lock at its head, digits Darkroom, the frame on screen
+    // inverted to a Darkroom block. It fades in place when a lock appears and
+    // goes when it is dropped (160 ms, ease out cubic). Clicking a frame goes
+    // there, clicking the monogram or the lock unlocks. The workspace on
+    // screen can show in both groups and is marked in both.
+    //
+    // The rail's head never moves (see TESTING.md, "No layout shifts"): its
+    // y is a function of the bar's height only, so the workspace list above,
+    // the tray and the clock below, a lock change and the roll's length all
+    // leave it where it is. A roll grows and shrinks downward from the head;
+    // the list above clips and scrolls at the head instead of pushing it.
     readonly property int pipStep: 28 + Theme.s4
     readonly property int groupGap: Theme.s16
 
@@ -319,18 +324,29 @@ PanelWindow {
     readonly property int lockH: 18
     readonly property int railY0: monoH + Theme.s4
     readonly property int framesY: lockH + Theme.s4          // inside the rail
-    readonly property real midFull: railY0 + framesY + railItems.length * pipStep
+    readonly property int headH: railY0 + framesY
+    readonly property real midFull: headH + railItems.length * pipStep
+    // The middle group's anchor: a four-frame roll sits centred on the bar.
+    // It depends on the bar's height alone. On a bar too short for that it
+    // moves up just enough to keep the head and one frame above the fixed
+    // part of the bottom stack (everything but the tray, which grows upward
+    // into the rail's room instead), and never above two workspace rows.
+    readonly property real midTop: {
+        const centred = Math.round((height - (headH + 4 * pipStep)) / 2);
+        const low = fixedStackTop - Theme.s12 - headH - pipStep;
+        const high = selTop + 2 * pipStep - Theme.s4 + groupGap;
+        return Math.max(high, Math.min(centred, low));
+    }
+    // Top of the bottom stack without the tray and its hairline.
+    readonly property real fixedStackTop: bottomStack.y
+        + (trayGroup.visible ? trayGroup.height + 2 * bottomStack.spacing + 1 : 0)
     // The middle group keeps its room while it fades out.
     readonly property bool midReserved: hasLock || mid.opacity > 0
     readonly property real topFull: Math.max(1, spaceItems.length) * pipStep - Theme.s4
-    // The top group gives up rows (and scrolls) before the middle shrinks,
-    // down to two rows.
-    readonly property real topView: {
-        const room = selBottom - selTop;
-        if (!midReserved) return Math.max(0, Math.min(topFull, room));
-        const floor = Math.min(topFull, 2 * pipStep - Theme.s4);
-        return Math.max(floor, Math.min(topFull, room - groupGap - midFull));
-    }
+    // The top group stops above the rail's head while a lock is shown, and
+    // above the bottom stack otherwise; past that it clips and scrolls.
+    readonly property real topView: Math.max(0, Math.min(topFull,
+        (midReserved ? midTop - groupGap : selBottom) - selTop))
 
     Item {
         id: topGroup
@@ -365,18 +381,20 @@ PanelWindow {
         // 0 absent, 1 shown: fades and grows in place.
         property real shown: bar.hasLock ? 1 : 0
         Behavior on shown { NumberAnimation { duration: Theme.tLock; easing.type: Easing.OutCubic } }
-        readonly property real regionTop: bar.selTop + bar.topView + bar.groupGap
-        readonly property real room: Math.max(0, bar.selBottom - regionTop)
+        // Fixed head; the frames below it clip and scroll once the bottom
+        // stack (a growing tray) takes their room.
+        readonly property real room: Math.max(bar.headH + bar.pipStep, bar.selBottom - y)
         anchors.horizontalCenter: parent.horizontalCenter
         width: 36
         height: Math.min(bar.midFull, room)
-        y: regionTop + Math.max(0, (room - height) / 2)
+        y: bar.midTop
         visible: opacity > 0
         opacity: shown
-        scale: bar.lerp(0.9, 1, shown)
-        transformOrigin: Item.Center
-        // A roll change while locked eases the column to its new length.
-        Behavior on y { enabled: mid.shown === 1; NumberAnimation { duration: Theme.tLock; easing.type: Easing.OutCubic } }
+        // Appears from its head: it grows down, never around its centre.
+        scale: bar.lerp(0.96, 1, shown)
+        transformOrigin: Item.Top
+        // A roll change while locked eases the column to its new length,
+        // downward from the head.
         Behavior on height { enabled: mid.shown === 1; NumberAnimation { duration: Theme.tLock; easing.type: Easing.OutCubic } }
 
         // The roll's initials; they cross-fade when the lock moves to
@@ -445,7 +463,8 @@ PanelWindow {
         }
     }
 
-    // Bottom stack, above the clock. Every row is a 28 px cell, 4 px apart
+    // Bottom stack, above the clock, from the top: tray, launcher and
+    // clipboard, the bell, the system cluster. Every row is a 28 px cell, 4 px apart
     // inside a group and a hairline with 8 px either side between groups, so
     // the glyphs sit on one rhythm. Glyphs are one family (Material Design
     // from the Nerd Font) at 16 px; tray icons are drawn flat in Paper at the
@@ -456,20 +475,14 @@ PanelWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         spacing: Theme.s8
 
-        // Launcher and clipboard history, both vicinae views.
-        Column {
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: Theme.s4
-            BarButton { glyph: "󰀻"; label: "Launcher"; onClicked: Quickshell.execDetached(["vicinae", "toggle"]) }
-            BarButton { glyph: "󰅍"; label: "Clipboard history"; onClicked: Quickshell.execDetached(["vicinae", "cmd", "launch", "clipboard:history"]) }
-        }
-
-        Hair { visible: SystemTray.items.values.length > 0 }
-
+        // The tray sits at the top of the stack: the stack hangs from the
+        // clock, so items that come and go only grow it upward, into free
+        // space, and never move the launcher, the bell or the cluster.
         // Tray: left click activates (or opens the menu for menu-only items),
         // right click opens the menu beside the bar, middle click is the
         // secondary action, the wheel scrolls the item.
         Column {
+            id: trayGroup
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: Theme.s4
             visible: SystemTray.items.values.length > 0
@@ -479,7 +492,7 @@ PanelWindow {
                     id: trayItem
                     required property var modelData
                     readonly property string label: modelData.tooltipTitle || modelData.title || modelData.id
-                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.horizontalCenter: parent ? parent.horizontalCenter : undefined
                     width: 32; height: 28
                     active: trayMenu.shown && trayMenu.item === modelData
                     acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
@@ -515,6 +528,16 @@ PanelWindow {
                     onHoveredChanged: hovered ? bar.tip(trayItem, trayItem.label) : bar.untip()
                 }
             }
+        }
+
+        Hair { visible: SystemTray.items.values.length > 0 }
+
+        // Launcher and clipboard history, both vicinae views.
+        Column {
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: Theme.s4
+            BarButton { glyph: "󰀻"; label: "Launcher"; onClicked: Quickshell.execDetached(["vicinae", "toggle"]) }
+            BarButton { glyph: "󰅍"; label: "Clipboard history"; onClicked: Quickshell.execDetached(["vicinae", "cmd", "launch", "clipboard:history"]) }
         }
 
         Hair {}
