@@ -82,6 +82,9 @@ PanelWindow {
             Glyph {
                 text: win.kind === "volume" ? Services.Audio.icon() : "󰃟"
                 size: 18
+                // One width for every glyph, so the slider never slides.
+                Layout.preferredWidth: 20
+                horizontalAlignment: Text.AlignHCenter
                 color: win.kind === "volume" && Services.Audio.muted ? Theme.fixer : Theme.paper
             }
             Slider { Layout.fillWidth: true; value: win.value; enabled: !(win.kind === "volume" && Services.Audio.muted) }

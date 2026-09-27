@@ -558,3 +558,81 @@ a second thread, a temporary slot, a 30-frame roll):
 
 Clip `recordings/grid-select.mp4` (30 s); screenshot of check c with the
 pointer marked.
+
+## No layout shifts (2026-09-27)
+
+The user reported "too many layout shifts" in the daily bar. Every element
+that could change size or place at runtime was checked; each shift found is
+either fixed or confined so it moves nothing anchored.
+
+| Shift | Where (before) | Fix |
+|---|---|---|
+| Locked rail moved when the workspace list grew or shrank | `bar/Bar.qml` `mid.y` = centre of the room below `topView` | the rail's head sits at `midTop`, a function of the bar height only (a four-frame roll centred on the bar; moved up only on a bar too short for it). The list above clips and scrolls at the head |
+| Rail moved when its own frame count changed (lock change, roll length) | same, `y` centred on its own height, with a `Behavior on y` | head fixed; the rail grows and shrinks downward only; the appear scale grows from the top (0.96 → 1) instead of the centre |
+| Rail moved when a tray icon appeared or left | `selBottom` fed the centring | the rail's anchor ignores the tray; a tray that grows into the rail's room only shortens the rail's scroll box |
+| Launcher, clipboard and bell moved up when tray icons appeared | tray group sat between them and the cluster | the tray is now the top group of the bottom stack; the stack hangs from the clock, so the tray grows upward into free space |
+| Control centre changed height per view (Wi-Fi 573, Bluetooth 525, sound 515 px; sheet top at y 498/546/556) | `QuickSettings.qml`, sheet height = `content.implicitHeight` | one view area of `Theme.qsViewH` (336 px, the Wi-Fi view's); Bluetooth's list box fills it; sound and brightness scroll inside it (`Flickable` + `ScrollEdges`) |
+| "Performance limited" line pushed the tab strip down | under the power profile row | moved to the end of the sound view, inside the fixed area |
+| Wi-Fi "Scan"/"Scanning" button changed width | header row | fixed to the width of "Scanning" |
+| Lock glyph and names in Wi-Fi/Bluetooth rows slid as the status word changed ("saved" → "connecting" → "connected") | `NetRow`, `BtRow` | status words in a fixed right-aligned column the width of "connecting" |
+| Output tick glyph vs blank | sink rows | fixed 16 px glyph column |
+| OSD slider moved between volume and brightness glyphs | `Osd.qml` | glyph column fixed at 20 px |
+| Popups below an expiring one jumped up | `notifications/Popups.qml` | `move` transition (`Theme.tHover`); the window height follows the gliding cards so none is clipped |
+| Grid breadcrumb ("in Proj") slid sideways on Shift+L | `grid/Grid.qml` header: title, lock, breadcrumb | lock glyph moved to the end of the header row (not screenshotted; the grid loads without warnings) |
+| Tray delegate warning on removal | `Bar.qml` tray item anchors | `parent ? … : undefined` |
+
+Checked and left as is (no shift, or intentional):
+
+- Clock: hours and minutes are two digits in the mono cut; day and month are
+  single centred lines in a fixed column, nothing beside them.
+- Battery percent (9 vs 100): mono, centred, nothing beside it. The battery
+  column itself shows only when UPower reports a battery (hardware presence).
+- Workspace and rail digits: fixed 28 px cells, centred; the current-one
+  bold/size change is a `scale` on the text, not layout.
+- Notification badge on the bell: an overlay anchored to the button.
+- Bar glyphs (Wi-Fi strength, Bluetooth, volume): `CrossGlyph` centred in
+  fixed 32×28 cells. Monogram: centred in a fixed 36×24 box.
+- Hover and press on `Pressable`: a 1 px lift and a 0.96 scale are
+  transforms, neighbours never move (kept, part of the motion language).
+- Tab labels (SSID length) and tile sub-labels: elided in fixed tiles.
+- Notification centre: fixed box (`Theme.centerListH`); the header's count
+  and "Clear all" appear without moving the title. New cards are added at the
+  top of the list (newest first), which is the list growing, inside the box.
+- Tray menu: grows downward from the item's row; only clamped at the screen
+  bottom would a submenu move its top (not seen with the tray now higher).
+- Fonts: `FontLoader` on local files is ready before first layout; the Nerd
+  Font glyphs come from the installed font.
+
+Lab: `scripts/lab.py up`, `lab.py audio`, envs `agents` (frames 1–4) and
+`shell` (5, 6), kitty on 1, 2, 3, 5, 6, shell with `HNS_FAKE_WIFI=12
+HNS_FAKE_BT=6` and the fake backlight. The same scripted walk ran on the old
+tree (`git archive e1c1bb7`) and the new one, one grim screenshot per state,
+then PIL measured positions and diffed crops.
+
+| State change | Before: rail head y | After: rail head y | After: pixel diff of the rail crop (0..44 × 440..640) vs base |
+|---|---|---|---|
+| base, `agents` locked | 365 | 458 | — |
+| +2 workspaces (7, 8) | 397 | 458 | identical |
+| +10 workspaces (list overflows) | 525 | 458 | identical (list clips at 14 and scrolls) |
+| workspaces removed | 365 | 458 | identical |
+| lock `shell` (2 frames) | 397 | 458 | lock row identical; rail ends 64 px higher |
+| unlock, relock | 365 | 458 | identical |
+| tray icon appears | 343 | 458 | identical; launcher to clock crop identical |
+| notification arrives | 343 | 458 | identical; bottom crop differs only in the bell badge |
+| tray icon leaves | 365 | 458 | identical |
+
+| Control centre view | Before: sheet top border y | After |
+|---|---|---|
+| Wi-Fi | 498 | 498 |
+| Bluetooth | 546 | 498 |
+| Sound | 556 | 498 |
+| Wi-Fi again | 498 | 498 |
+
+Notification centre: sheet top 383 before and after 3 more cards (it was
+already fixed). No QML warnings in the new run's log (apart from the lab's
+missing icon theme).
+
+Artifacts: `~/Artifacts/hyprnav-bar-stable.png` (before and after, side by
+side, cyan guides at the rail head and the sheet top) and
+`~/Artifacts/hyprnav-bar-stable.mp4` (35 s: lock change, workspaces added and
+removed, tray icon, every control centre view, notifications, centre).
