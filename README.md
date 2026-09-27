@@ -137,7 +137,8 @@ logind's `SetBrightness` (no udev rule needed), otherwise sysfs.
 nix-build lab-tools -o lab-tools/result   # once: cage, virtual seat, wtype, wf-recorder
 scripts/lab.py up            # disposable Cage + nested Hyprland + hyprnav daemon
 scripts/lab.py audio         # optional: private PipeWire with one null sink
-scripts/run.sh start         # shell on the lab's TEST output
+scripts/lab.py exec scripts/run.sh start   # shell on the lab's TEST output, in the lab's scope
+scripts/lab.py status        # the lab scope's memory use
 scripts/run.sh ipc call switcher open
 scripts/run.sh ipc call grid toggle
 scripts/run.sh ipc call qs toggle
@@ -148,6 +149,20 @@ scripts/run.sh ipc call caption display "text" 5000   # large caption for record
 scripts/demo.sh              # scripted walkthrough, recorded to recordings/
 scripts/lab.py down
 ```
+
+`lab.py up` runs the lab in a systemd scope of its own:
+`systemd-run --user --scope --unit hns-lab-<pid> -p MemoryMax=16G
+-p MemorySwapMax=0 -p TasksMax=4096 -p OOMPolicy=continue -p Delegate=yes`.
+An agent's shell (T3 Code's scope, for example) does not hold the lab's
+processes, so a leak in the lab is OOM-killed inside it. The caller keeps
+running, and so does the rest of the lab. Change the cap with
+`up --memory-max 8G` or `HNS_LAB_MEMORY_MAX`, or skip the scope with
+`up --no-scope`. `lab.py exec` and `lab.py audio` join the scope before they
+start anything. That is why the shell should start through
+`lab.py exec scripts/run.sh start`. A plain `scripts/run.sh start` leaves
+Quickshell in the caller's cgroup. `lab.py down` stops the process groups it
+recorded and then the scope, so nothing started in the lab survives. Without a
+systemd user manager, the lab runs unscoped as before.
 
 Without a lab (`lab/env.json` absent, or `HNS_LIVE=1`), `run.sh` targets the
 live session and restricts the shell to the output named in `HNS_SCREEN`
