@@ -526,3 +526,35 @@ shell running with each fix in place; the unfixed thumbnail did not crash
 either, so the close race does not reproduce on demand and (3) is the likely
 cause found by reading, not a reproduced one. Opening and closing the grid
 and the switcher starts four captures and stops all four at close.
+
+## The grid opens on the frame you are in (2026-09-27)
+
+Two faults. The grid took its first selection from the daemon's
+`initial_index`, which only looks in row 0 and falls back to row 0 col 0, so a
+frame in any other roll opened on the wrong cell. And the cell under a resting
+pointer took the selection at open: the compositor's pointer enter on the
+newly opened surface reached the cells as `entered`, and since any selection
+change set `userMoved`, the fresh snapshot could no longer correct it either.
+
+Now the grid picks the cell itself: the focused workspace from Hyprland's
+event stream, first row first, then a locked roll, then the roll that owns a
+shared frame. Hover goes through `HoverGate.qml`: inert after the open until
+the pointer has travelled more than 8 px in window coordinates from the first
+position seen, so neither the enter nor cells scrolling under a resting
+pointer count. A click still opens the cell under it. The switcher uses the
+same gate. `userMoved` is set only by keys, an armed hover and the palette.
+
+`scripts/grid-select-demo.sh seed | record` in the lab (thread roll locked,
+a second thread, a temporary slot, a 30-frame roll):
+
+| Check | Before (HEAD e1c1bb7) | After |
+|---|---|---|
+| a. Active is frame 8, column 4 of row 0 | row 0 col 4 | row 0 col 4 |
+| b. Active is the temporary slot (ws 101) | row 0 col 6 | row 0 col 6 |
+| c. Pointer resting on the Editor cell (col 2), open | row 0 col 2, stolen | row 0 col 4; moving 14 px selects col 2 |
+| d. Active is frame 24 of the long roll | row 0 col 0, not scrolled | row 1 col 23, opened scrolled to it |
+| Switcher, pointer resting on card 2 | selected 2 | selected 1 (MRU); moving selects 2 |
+| Keys (Right, Left, Down, Up, End, Home, Ctrl+P, Esc) | | unchanged |
+
+Clip `recordings/grid-select.mp4` (30 s); screenshot of check c with the
+pointer marked.

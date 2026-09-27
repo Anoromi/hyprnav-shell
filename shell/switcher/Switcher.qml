@@ -64,10 +64,20 @@ PanelWindow {
         }
         return reverse ? kept.length - 1 : Math.min(1, kept.length - 1);
     }
+    // Hover selects only once the pointer has moved since the open (see
+    // HoverGate.qml): a resting pointer must not take the ring off the MRU
+    // pick, least of all under a held Super whose release commits.
+    HoverGate { id: hoverGate; onArmedChanged: if (armed && win.hovered >= 0) win.hoverPick(win.hovered) }
+    property int hovered: -1
+    function hoverPick(i) {
+        if (phase !== "open" || i < 0 || i >= items.length) return;
+        selected = i; userMoved = true; heldKey = key(items[i]);
+    }
     function present(res, reverse) {
         const kept = res.items.filter(it => !win.isTemporary(it));
         if (kept.length === 0) return false;
         selected = initialIndex(res, reverse, kept);
+        hoverGate.reset(); hovered = -1;
         perf.arm("open");
         finish.stop();
         phase = "open"; open = true;
@@ -207,7 +217,12 @@ PanelWindow {
                 const n = ev.key - Qt.Key_1; if (n < win.items.length) { win.selected = n; win.activate(); } ev.accepted = true;
             }
         }
-        MouseArea { anchors.fill: parent; enabled: win.open; onClicked: win.cancel() }
+        MouseArea {
+            id: backdrop
+            anchors.fill: parent; enabled: win.open; onClicked: win.cancel()
+            hoverEnabled: true
+            onPositionChanged: mouse => hoverGate.moved(backdrop, mouse.x, mouse.y)
+        }
     }
 
     // Everything drawn: one short fade in and out, nothing moves.
@@ -257,11 +272,15 @@ PanelWindow {
                         color: Theme.pencil
                     }
                     MouseArea {
+                        id: cardMouse
                         anchors.fill: parent
                         enabled: win.open
                         hoverEnabled: true
-                        onEntered: { win.selected = card.index; win.userMoved = true; win.heldKey = win.key(card.modelData); }
-                        onClicked: win.activate()
+                        onEntered: { win.hovered = card.index; if (hoverGate.armed) win.hoverPick(card.index); }
+                        onExited: if (win.hovered === card.index) win.hovered = -1
+                        onPositionChanged: mouse => hoverGate.moved(cardMouse, mouse.x, mouse.y)
+                        // A click is deliberate: it opens the card under it.
+                        onClicked: { win.hoverPick(card.index); win.activate(); }
                     }
                 }
                 Row {

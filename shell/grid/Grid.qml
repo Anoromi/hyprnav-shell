@@ -42,17 +42,60 @@ PanelWindow {
     FocusRelease { id: afterRelease }
 
     property bool waitingOpen: false
+    // The user picked a cell since the open (keys, a moved pointer, the
+    // palette): a late snapshot then keeps their choice. Set only by `pick()`.
     property bool userMoved: false
+    function pick(r, c) { selRow = r; selCol = c; userMoved = true; }
+    // The frame the user is looking at. The focused workspace comes from
+    // Hyprland's event stream, which is fresher than the snapshot's `active`
+    // flags right after a switch. A shared frame shows in several rolls:
+    // take the first row (the daemon puts the locked or current environment
+    // there), then a locked roll, then the roll that owns the frame, then
+    // the one the daemon marked active, then the topmost. Temporary slots are
+    // cells like any other. Returns null when no roll shows the workspace.
+    function activeCellPos() {
+        const rs = Services.Hyprnav.rows;
+        const ws = Hyprland.focusedWorkspace?.id ?? Services.Hyprnav.activeCell?.physical_workspace_id ?? null;
+        let best = null, bestRank = -1;
+        for (let r = 0; r < rs.length; r++) {
+            const cells = rs[r].cells;
+            for (let c = 0; c < cells.length; c++) {
+                const s = cells[c].snapshot;
+                if (!(ws !== null ? s.physical_workspace_id === ws : s.active === true)) continue;
+                const rank = (r === 0 ? 8 : 0) + (rs[r].locked ? 4 : 0) + ((s.shared ?? s.inherited) ? 0 : 2) + (s.active ? 1 : 0);
+                if (rank > bestRank) { best = { r: r, c: c }; bestRank = rank; }
+            }
+        }
+        return best;
+    }
     function selectInitial(res) {
         const rs = Services.Hyprnav.rows;
-        let r = 0, c = 0;
-        const it = res.items[res.initial_index];
-        if (it) { r = rs.findIndex(x => x.rowIndex === it.row_index); c = Math.max(0, it.column_index); if (r < 0) r = 0; }
-        selRow = r; selCol = Math.min(c, (rs[r]?.cells.length ?? 1) - 1);
+        let pos = activeCellPos();
+        if (!pos) {
+            // Not a frame of any roll (a stray workspace): the daemon's pick,
+            // which is the first roll's first frame.
+            const it = res.items[res.initial_index];
+            let r = it ? rs.findIndex(x => x.rowIndex === it.row_index) : 0;
+            if (r < 0) r = 0;
+            pos = { r: r, c: it ? Math.max(0, it.column_index) : 0 };
+        }
+        selRow = pos.r; selCol = Math.max(0, Math.min(pos.c, (rs[pos.r]?.cells.length ?? 1) - 1));
         userMoved = false;
     }
+    // Hover selects only once the pointer has moved since the open (see
+    // HoverGate.qml); `hovered` is the cell under the pointer meanwhile, so
+    // the first real move can select it without waiting for another enter.
+    HoverGate { id: hoverGate; onArmedChanged: if (armed) win.hoverSelect() }
+    property var hovered: null
+    function hoverEnter(r, c) {
+        hovered = { r: r, c: c };
+        if (hoverGate.armed && !scrolling) pick(r, c);
+    }
+    function hoverExit(r, c) { if (hovered && hovered.r === r && hovered.c === c) hovered = null; }
+    function hoverSelect() { if (hovered && !scrolling && phase === "open") pick(hovered.r, hovered.c); }
     function present(res) {
         selectInitial(res);
+        hoverGate.reset(); hovered = null;
         pendingScroll = true;
         perf.arm("open");
         finish.stop();
@@ -97,19 +140,19 @@ PanelWindow {
     function moveCell(dc) {
         const n = rows[selRow]?.cells.length ?? 0;
         if (n === 0) return;
-        selCol = Math.max(0, Math.min(n - 1, selCol + dc));
+        pick(selRow, Math.max(0, Math.min(n - 1, selCol + dc)));
     }
     function moveLine(dr) {
         const n = rows[selRow]?.cells.length ?? 0;
         if (n === 0) return;
         const col = selCol % cols;
         const line = Math.floor(selCol / cols) + dr;
-        if (line >= 0 && line < linesIn(n)) { selCol = Math.min(n - 1, line * cols + col); return; }
+        if (line >= 0 && line < linesIn(n)) { pick(selRow, Math.min(n - 1, line * cols + col)); return; }
         const r = selRow + dr;
         if (r < 0 || r >= rows.length) return;
         const m = rows[r].cells.length;
         const target = dr > 0 ? col : (linesIn(m) - 1) * cols + col;
-        selRow = r; selCol = Math.max(0, Math.min(m - 1, target));
+        pick(r, Math.max(0, Math.min(m - 1, target)));
     }
     function activate() {
         const cell = selectedCell; if (!cell || phase !== "open") return;
@@ -243,8 +286,8 @@ PanelWindow {
         if (top - scrollMargin < vTop) scrollY = clampScroll(top - scrollMargin - topInset);
         else if (bottom + scrollMargin > vBottom) scrollY = clampScroll(bottom + scrollMargin - topInset - viewportH);
     }
-    onSelRowChanged: { ensureVisible(); userMoved = true; }
-    onSelColChanged: { ensureVisible(); userMoved = true; }
+    onSelRowChanged: ensureVisible()
+    onSelColChanged: ensureVisible()
     // Rows far outside the viewport keep their delegates but stop painting, so
     // ScreencopyView does not capture windows nobody can see.
     function rowVisible(i) {
@@ -285,7 +328,12 @@ PanelWindow {
             }
             ev.accepted = true;
         }
-        MouseArea { anchors.fill: parent; enabled: win.open; onClicked: win.close() }
+        MouseArea {
+            id: backdrop
+            anchors.fill: parent; enabled: win.open; onClicked: win.close()
+            hoverEnabled: true
+            onPositionChanged: mouse => hoverGate.moved(backdrop, mouse.x, mouse.y)
+        }
         // Wheel and touchpad scroll the stack and never move the selection.
         WheelHandler {
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
@@ -493,13 +541,18 @@ PanelWindow {
                                         }
                                     }
                                     MouseArea {
+                                        id: cellMouse
                                         anchors.fill: parent
                                         enabled: win.open
                                         hoverEnabled: true
-                                        // A scroll drags cells under a resting pointer; do
-                                        // not let that steal the selection from the keys.
-                                        onEntered: { if (win.scrolling) return; win.selRow = rowItem.index; win.selCol = cellItem.index; }
-                                        onClicked: win.activate()
+                                        // Neither a pointer resting where it was when the
+                                        // grid opened nor cells scrolled under it take the
+                                        // selection from the keys (see hoverEnter).
+                                        onEntered: win.hoverEnter(rowItem.index, cellItem.index)
+                                        onExited: win.hoverExit(rowItem.index, cellItem.index)
+                                        onPositionChanged: mouse => hoverGate.moved(cellMouse, mouse.x, mouse.y)
+                                        // A click is deliberate: it opens the frame under it.
+                                        onClicked: { win.pick(rowItem.index, cellItem.index); win.activate(); }
                                     }
                                 }
                                 Row {
@@ -693,7 +746,7 @@ PanelWindow {
         case "env-rename": if (row && text.trim()) Services.Hyprnav.envTitleSet(row.envId, text.trim()); break;
         case "lock": win.toggleLock(); break;
         case "env-delete": if (row) Services.Hyprnav.envDelete(row.envId); break;
-        case "goto-locked": { const lockedRow = win.rows.findIndex(r => r.locked); if (lockedRow >= 0) { win.selRow = lockedRow; win.selCol = 0; } break; }
+        case "goto-locked": { const lockedRow = win.rows.findIndex(r => r.locked); if (lockedRow >= 0) win.pick(lockedRow, 0); break; }
         case "refresh": Services.Hyprnav.refreshAll(); break;
         }
     }
