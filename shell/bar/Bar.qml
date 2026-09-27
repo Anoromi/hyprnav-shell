@@ -12,11 +12,11 @@ import QtQuick.Effects
 import "../services" as Services
 import ".."
 
-// Left edge column, like the edge of a film strip: workspace numbers, or a
-// locked roll's frame numbers on a pencil rail, run down it. The bottom
-// stacks, from
-// the top: launcher and clipboard, tray, the notification bell, the system
-// cluster (opens quick settings), the clock.
+// Left edge column, like the edge of a film strip: the screen's workspace
+// numbers run down from the top, and while hyprnav holds a lock the locked
+// roll's frame numbers sit on a pencil rail in the middle. The bottom stacks,
+// from the top: launcher and clipboard, tray, the notification bell, the
+// system cluster (opens quick settings), the clock.
 PanelWindow {
     id: bar
     required property var modelData
@@ -33,8 +33,6 @@ PanelWindow {
     // Each screen's bar follows the workspace shown on that screen.
     readonly property var monitor: Hyprland.monitors.values.find(m => m.name === screen.name) ?? null
     readonly property var focusedWs: monitor && monitor.activeWorkspace ? monitor.activeWorkspace : Hyprland.focusedWorkspace
-    readonly property var cell: focusedWs ? Services.Hyprnav.cellForWorkspace(focusedWs.id) : Services.Hyprnav.activeCell
-    readonly property var roll: cell ? (Services.Hyprnav.rows.find(r => r.envId === cell.environment_id)?.cells ?? []) : []
 
     readonly property var wifiDev: Networking.devices.values.find(d => d.type === DeviceType.Wifi) ?? null
     readonly property var wifiNet: wifiDev ? (wifiDev.networks.values.find(n => n.connected) ?? null) : null
@@ -122,129 +120,98 @@ PanelWindow {
 
     Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: Theme.emulsion }
 
-    // Top: the workspace selector. Two lists share one column of fixed rows.
+    // Top: the workspace selector, two groups that are pure functions of
+    // state and never share a row.
     //
-    // Unlocked (hyprnav follows focus, or this screen shows a workspace that
-    // is not in the locked roll): every Hyprland workspace on this screen,
-    // ids 1 and up in id order. Special workspaces and hyprnav's managed
-    // workspaces (101 and up) are left out, except the one on screen, which
-    // is listed last under its frame number in its roll rather than a raw
-    // "103". The current one sits in a Pencil block, occupied ones are Paper,
-    // empty ones Fixer. No monogram; an open lock at the head locks the roll
-    // of the current workspace when it has one.
+    // At the top, every Hyprland workspace on this screen with an id from 1
+    // to 99, in id order: the current one in a Pencil block, occupied ones
+    // Paper, empty ones Fixer. Specials and hyprnav's managed workspaces
+    // (100 and up) never get a pip. Clicking one goes there; right-clicking
+    // one that belongs to a roll locks that roll. The group is always there
+    // and never moves; when it is taller than the room left it clips and
+    // scrolls on the wheel, with soft edges.
     //
-    // Locked to the roll of the current workspace: its numbered frames sit on
-    // a Pencil rail with a lock at its head and the roll's initials above,
-    // digits Darkroom, the current frame inverted to a Darkroom block.
-    //
-    // Switching modes never moves a digit. Row i is always at the same y; a
-    // row whose label differs between the lists cross-fades in place. The
-    // rail grows out from behind the current frame to cover the group
-    // (160 ms, ease out cubic) and each digit takes its locked colour as the
-    // rail passes it; unlocking runs the same geometry back. The column keeps
-    // room for the longer list.
-    readonly property var frames: roll.map(c => c.snapshot).filter(c => c && !c.unnumbered)
-    readonly property int activeIndex: cell ? frames.findIndex(c => c.slot_index === cell.slot_index) : -1
+    // In the middle of the free space between that group and the bottom
+    // cluster, only while hyprnav holds a lock: the locked roll's monogram
+    // over its numbered frames on a Pencil rail with a lock at its head,
+    // digits Darkroom, the frame on screen inverted to a Darkroom block. It
+    // fades and grows in place when a lock appears and shrinks away when it
+    // goes (160 ms, ease out cubic). Clicking a frame goes there, clicking
+    // the monogram or the lock unlocks. The workspace on screen can show in
+    // both groups and is marked in both.
     readonly property int pipStep: 28 + Theme.s4
-    readonly property string envTitle: cell ? (cell.environment_title || cell.environment_name || cell.environment_id || "") : ""
-    readonly property int lockRow: 18        // rail head that holds the lock
-    readonly property int railY0: 24 + Theme.s4                // below the monogram
-    readonly property int stripY: railY0 + lockRow + Theme.s4  // first row
+    readonly property int groupGap: Theme.s16
 
     // Every workspace on this screen. Hyprland.workspaces follows the
     // compositor's create, destroy and focus events and each workspace's
     // toplevels its window events, so nothing here polls.
-    readonly property var spaces: {
+    readonly property var spaceItems: {
         const name = screen ? screen.name : "";
-        const cur = focusedWs ? focusedWs.id : null;
         return Hyprland.workspaces.values
-            .filter(w => w.id >= 1 && w.monitor && w.monitor.name === name && (w.id < 101 || w.id === cur))
-            .sort((a, b) => a.id - b.id);
+            .filter(w => w.id >= 1 && w.id < 100 && w.monitor && w.monitor.name === name)
+            .sort((a, b) => a.id - b.id)
+            .map(w => ({
+                id: w.id,
+                label: String(w.id),
+                current: focusedWs !== null && w.id === focusedWs.id,
+                filled: w.toplevels.values.length > 0
+            }));
     }
-    readonly property var spaceItems: spaces.map(w => ({
-        id: w.id,
-        label: w.id < 101 ? String(w.id)
-            : (cell && cell.physical_workspace_id === w.id && !cell.unnumbered ? String(cell.slot_index) : w.name),
-        current: focusedWs !== null && w.id === focusedWs.id,
-        filled: w.toplevels.values.length > 0
-    }))
-    readonly property int spaceIndex: spaceItems.findIndex(s => s.current)
 
-    // `lockRaw` is what the daemon says right now. Moving focus from one roll
-    // to another reads unlocked for the ~100 ms until the daemon's new lock
-    // arrives, so a drop to unlocked waits briefly while a lock exists
-    // elsewhere; an explicit unlock (no lock anywhere) shows at once.
-    readonly property bool lockRaw: cell !== null && (cell.environment_locked === true || Services.Hyprnav.lockedEnv === cell.environment_id)
-    property bool locked: false
-    onLockRawChanged: {
-        if (lockRaw || Services.Hyprnav.lockedEnv === "") { lockHold.stop(); locked = lockRaw; }
-        else lockHold.restart();
-    }
-    Connections {
-        target: Services.Hyprnav
-        function onLockedEnvChanged() { if (Services.Hyprnav.lockedEnv === "" && !bar.lockRaw) { lockHold.stop(); bar.locked = false; } }
-    }
-    Timer { id: lockHold; interval: 250; onTriggered: bar.locked = bar.lockRaw }
-
-    // 0 unlocked, 1 locked; drives the rail, the colours and the monogram.
-    property real lockT: locked ? 1 : 0
-    Behavior on lockT { NumberAnimation { duration: Theme.tLock; easing.type: Easing.OutCubic } }
-
-    // The roll on the rail, held while the rail is up so it can shrink back
-    // over the frames it covered after focus has left the roll.
-    property var railFrames: []
-    property int railActive: -1
+    // The locked roll. `status_get` carries the lock; the grid snapshot's
+    // row flag covers the moment before the first status reply.
+    readonly property string lockEnv: Services.Hyprnav.lockedEnv !== "" ? Services.Hyprnav.lockedEnv
+        : (Services.Hyprnav.rows.find(r => r.locked)?.envId ?? "")
+    readonly property var lockedRoll: lockEnv !== "" ? (Services.Hyprnav.rows.find(r => r.envId === lockEnv) ?? null) : null
+    readonly property var rollItems: (lockedRoll ? lockedRoll.cells : [])
+        .map(c => c.snapshot).filter(f => f && !f.unnumbered)
+        .map(f => ({
+            label: String(f.slot_index),
+            current: focusedWs !== null && f.physical_workspace_id === focusedWs.id,
+            filled: f.window_count > 0, stuck: f.stuck === true, frame: f
+        }))
+    readonly property bool hasLock: rollItems.length > 0
+    // Held while the middle group fades out, so it leaves with what it showed.
+    property var railItems: []
     property string railEnv: ""
+    property string railTitle: ""
     function syncRail() {
-        if (lockT > 0 && !locked) return;
-        if (frames.length === 0 && lockT > 0) return;
-        railFrames = frames; railActive = activeIndex; railEnv = cell ? cell.environment_id : "";
+        if (!hasLock || !lockedRoll) return;
+        railItems = rollItems; railEnv = lockEnv;
+        railTitle = lockedRoll.title || lockedRoll.displayId || lockEnv;
     }
-    onFramesChanged: syncRail()
-    onActiveIndexChanged: syncRail()
-    onLockedChanged: syncRail()
-    onLockTChanged: if (lockT === 0) syncRail()
-    Component.onCompleted: { locked = lockRaw; syncRail(); }
-    readonly property var railItems: railFrames.map((f, i) => ({
-        label: String(f.slot_index), current: i === railActive, filled: f.window_count > 0, stuck: f.stuck === true, frame: f
-    }))
-    // Rail length in rows, eased so a roll change while locked never snaps it.
-    property real railLen: railFrames.length
-    Behavior on railLen { NumberAnimation { duration: Theme.tLock; easing.type: Easing.OutCubic } }
-    readonly property int rowCount: Math.max(spaceItems.length, railFrames.length)
+    onRollItemsChanged: syncRail()
+    Component.onCompleted: syncRail()
 
-    // Rail geometry: from the current frame's 28 px box to the whole group.
-    readonly property int railOrigin: Math.max(0, railActive)
-    readonly property real railTop: lerp(stripY + railOrigin * pipStep, railY0, lockT)
-    readonly property real railBottom: lerp(stripY + railOrigin * pipStep + 28,
-        railY0 + lockRow + Theme.s4 * 2 + railLen * pipStep - Theme.s4, lockT)
-    readonly property bool headReached: clamp01((stripY - Theme.s4 - railTop) / lockRow) >= 0.5
-    property real headT: headReached ? 1 : 0
-    Behavior on headT { NumberAnimation { duration: Theme.tHover; easing.type: Easing.OutCubic } }
-    // How far the rail has reached row i: 0 bare, 1 on the rail.
-    function rowT(i) {
-        if (i >= railFrames.length || i === railOrigin) return lockT;
-        const top = stripY + i * pipStep;
-        return i < railOrigin ? clamp01((top + 28 - railTop) / 28) : clamp01((railBottom - top) / 28);
+    function goTo(it, button) {
+        if (!it) return;
+        if (button === Qt.RightButton) {
+            // A plain workspace that is a roll's frame: keep that roll.
+            const c = it.frame ? null : Services.Hyprnav.cellForWorkspace(it.id);
+            if (c && c.environment_id !== lockEnv) Services.Hyprnav.lock(c.environment_id);
+            return;
+        }
+        if (it.current) Quickshell.execDetached(["qs", "-p", Quickshell.shellDir, "ipc", "call", "grid", "toggle"]);
+        else if (it.frame) Services.Hyprnav.gotoSlot(it.frame.environment_id, it.frame.slot_index);
+        else Services.Hyprnav.gotoPhysical(it.id);
     }
+    function pipTip(row, it, on) {
+        if (!on || !it || it.frame) { bar.untip(); return; }
+        const c = Services.Hyprnav.cellForWorkspace(it.id);
+        if (!c) { bar.untip(); return; }
+        const title = c.environment_title || c.environment_id;
+        bar.tip(row, c.environment_id === lockEnv ? title + ", frame " + c.slot_index
+            : title + ", frame " + c.slot_index + "\nRight-click to lock");
+    }
+
     function lerp(a, b, t) { return a + (b - a) * t; }
     function clamp01(x) { return Math.max(0, Math.min(1, x)); }
     function mix(a, b, t) { return Qt.rgba(lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t), lerp(a.a, b.a, t)); }
     readonly property color dimDarkroom: Qt.rgba(0.102, 0.098, 0.090, 0.55)
 
-    function rollTip() {
-        if (locked) return envTitle + " (locked)\nClick the initials to follow focus";
-        return cell ? "Workspaces on this screen\nClick the lock to keep " + envTitle : "Workspaces on this screen";
-    }
-    function toggleLock() {
-        if (locked) Services.Hyprnav.unlock();
-        else if (cell) Services.Hyprnav.lock(cell.environment_id);
-    }
-
     // A frame number that cross-fades when its text changes. `cover` is how
     // much of it the block covers: its colour turns as the block slides over
-    // it, so a digit is never dark on the bare bar while the block is still
-    // on its way. `big` grows it into the current style (Bold, 18 px).
+    // it. `big` grows it into the current style (Bold, 18 px).
     component Digit: Item {
         id: d
         property string text: ""
@@ -278,52 +245,140 @@ PanelWindow {
         }
     }
 
-    Item {
-        id: top
-        anchors.top: parent.top; anchors.topMargin: Theme.s12
-        anchors.horizontalCenter: parent.horizontalCenter
+    // A column of numbers with one block for the current one, on the bare
+    // bar (Pencil block, Paper digits) or on the rail (Darkroom block,
+    // Darkroom digits). Rows are fixed and spare ones kept, so a new
+    // workspace fades into an existing row instead of rebuilding the column.
+    component PipColumn: Item {
+        id: col
+        property var items: []
+        property bool onRail: false
+        readonly property int current: items.findIndex(s => s.current)
         width: 36
-        height: bar.stripY + Math.max(1, bar.rowCount) * bar.pipStep
-
-        // The rail, drawn first so the block and digits sit on it.
+        height: Math.max(1, items.length) * bar.pipStep - Theme.s4
         Rectangle {
-            id: rail
-            visible: bar.lockT > 0 && bar.railFrames.length > 0
-            x: bar.lerp(4, 0, bar.lockT)
-            width: bar.lerp(28, 36, bar.lockT)
-            y: bar.railTop
-            height: bar.railBottom - bar.railTop
-            radius: bar.lerp(Theme.rFrame, Theme.rSheet - 2, bar.lockT)
-            color: Theme.pencil
-            // Shrinking into the block it simply disappears behind it. When
-            // the block has gone to another row it fades over the last
-            // quarter instead, so it never snaps off in the open.
-            opacity: block.row === bar.railOrigin ? 1 : bar.clamp01(bar.lockT * 4)
-        }
-
-        // The current workspace or frame: one block for both lists.
-        Rectangle {
-            id: block
-            readonly property int row: bar.locked ? bar.railActive : bar.spaceIndex
+            id: blk
             x: 4; width: 28; height: 28; radius: Theme.rFrame
-            y: bar.stripY + Math.max(0, row) * bar.pipStep
-            color: bar.mix(Theme.pencil, Theme.darkroom, bar.lockT)
-            opacity: row >= 0 ? 1 : 0
-            Behavior on y { enabled: !Theme.reducedMotion; SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.2 } }
+            y: Math.max(0, col.current) * bar.pipStep
+            color: col.onRail ? Theme.darkroom : Theme.pencil
+            opacity: col.current >= 0 ? 1 : 0
+            Behavior on y { enabled: !Theme.reducedMotion && blk.opacity > 0; SpringAnimation { spring: 4.2; damping: 0.36; epsilon: 0.2 } }
             Behavior on opacity { NumberAnimation { duration: Theme.tHover } }
         }
+        Repeater {
+            model: Math.max(12, col.items.length)
+            Item {
+                id: row
+                required property int index
+                readonly property var it: col.items[index] ?? null
+                readonly property real cover: blk.opacity * bar.clamp01(1 - Math.abs(blk.y - y) / 28)
+                x: 4; y: index * bar.pipStep
+                width: 28; height: 28
+                opacity: it ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: Theme.tHover } }
+                Rectangle {
+                    anchors.fill: parent; radius: Theme.rFrame
+                    color: !rowMouse.containsMouse || row.it === null || row.it.current ? "transparent"
+                        : (col.onRail ? Qt.rgba(0.102, 0.098, 0.090, 0.14) : Theme.hover)
+                    Behavior on color { ColorAnimation { duration: Theme.tHover } }
+                }
+                Digit {
+                    text: row.it ? row.it.label : ""
+                    cover: row.cover
+                    big: row.it && row.it.current ? row.cover : 0
+                    rest: col.onRail ? (row.it && !row.it.filled ? bar.dimDarkroom : Theme.darkroom)
+                        : (row.it && row.it.filled ? Theme.paper : Theme.fixer)
+                    hot: col.onRail ? Theme.pencil : Theme.darkroom
+                }
+                // Pin: a spawned process tree is stuck to this frame.
+                Glyph { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: -3; anchors.topMargin: -5; visible: col.onRail && row.it !== null && row.it.stuck; text: "󰐃"; size: 12; color: Theme.darkroom }
+                MouseArea {
+                    id: rowMouse; anchors.fill: parent; hoverEnabled: true
+                    enabled: row.it !== null
+                    acceptedButtons: col.onRail ? Qt.LeftButton : Qt.LeftButton | Qt.RightButton
+                    onClicked: m => bar.goTo(row.it, m.button)
+                    onContainsMouseChanged: bar.pipTip(row, row.it, containsMouse)
+                }
+            }
+        }
+    }
 
-        // Head: the roll's initials, then the lock. Open in Fixer while
-        // unlocked (only when the current workspace belongs to a roll),
-        // closed in Darkroom once the rail reaches it.
-        // Initials cross-fade when focus moves the lock to another roll.
+    // Room for the selector: from the top margin to above the bottom stack.
+    readonly property real selTop: Theme.s12
+    readonly property real selBottom: bottomStack.y - Theme.s12
+    // The middle group's full height: monogram, rail head, frames.
+    readonly property int monoH: 24
+    readonly property int lockH: 18
+    readonly property int railY0: monoH + Theme.s4
+    readonly property int framesY: lockH + Theme.s4          // inside the rail
+    readonly property real midFull: railY0 + framesY + railItems.length * pipStep
+    // The middle group keeps its room while it fades out.
+    readonly property bool midReserved: hasLock || mid.opacity > 0
+    readonly property real topFull: Math.max(1, spaceItems.length) * pipStep - Theme.s4
+    // The top group gives up rows (and scrolls) before the middle shrinks,
+    // down to two rows.
+    readonly property real topView: {
+        const room = selBottom - selTop;
+        if (!midReserved) return Math.max(0, Math.min(topFull, room));
+        const floor = Math.min(topFull, 2 * pipStep - Theme.s4);
+        return Math.max(floor, Math.min(topFull, room - groupGap - midFull));
+    }
+
+    Item {
+        id: topGroup
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: bar.selTop
+        width: 36; height: bar.topView
+        Flickable {
+            id: topFlick
+            anchors.fill: parent
+            clip: true
+            interactive: false
+            contentWidth: width; contentHeight: bar.topFull
+            PipColumn { id: topCol; items: bar.spaceItems }
+        }
+        ScrollEdges { id: topEdges; anchors.fill: parent; flick: topFlick; step: bar.pipStep }
+        // Keep the current workspace in view when it changes.
+        function reveal() {
+            const i = topCol.current;
+            if (i < 0 || !topEdges.overflows) return;
+            const y0 = i * bar.pipStep, y1 = y0 + 28;
+            // One row of margin, so the current one never sits under a fade.
+            const m = bar.pipStep;
+            if (y0 - m < topFlick.contentY) topEdges.scrollTo(y0 - m, true);
+            else if (y1 + m > topFlick.contentY + topFlick.height) topEdges.scrollTo(y1 + m - topFlick.height, true);
+        }
+        Connections { target: topCol; function onCurrentChanged() { topGroup.reveal(); } }
+        onHeightChanged: { topEdges.scrollTo(topFlick.contentY, false); reveal(); }
+    }
+
+    Item {
+        id: mid
+        // 0 absent, 1 shown: fades and grows in place.
+        property real shown: bar.hasLock ? 1 : 0
+        Behavior on shown { NumberAnimation { duration: Theme.tLock; easing.type: Easing.OutCubic } }
+        readonly property real regionTop: bar.selTop + bar.topView + bar.groupGap
+        readonly property real room: Math.max(0, bar.selBottom - regionTop)
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: 36
+        height: Math.min(bar.midFull, room)
+        y: regionTop + Math.max(0, (room - height) / 2)
+        visible: opacity > 0
+        opacity: shown
+        scale: bar.lerp(0.9, 1, shown)
+        transformOrigin: Item.Center
+        // A roll change while locked eases the column to its new length.
+        Behavior on y { enabled: mid.shown === 1; NumberAnimation { duration: Theme.tLock; easing.type: Easing.OutCubic } }
+        Behavior on height { enabled: mid.shown === 1; NumberAnimation { duration: Theme.tLock; easing.type: Easing.OutCubic } }
+
+        // The roll's initials; they cross-fade when the lock moves to
+        // another roll.
         Item {
             id: monogram
             readonly property string text: Services.Hyprnav.monogramFor(bar.railEnv)
             property bool flip: false
             anchors.horizontalCenter: parent.horizontalCenter
-            width: 36; height: 24
-            opacity: bar.headT
+            width: 36; height: bar.monoH
             onTextChanged: {
                 if (!flip && ma.text === text || flip && mb.text === text) return;
                 if (flip) ma.text = text; else mb.text = text;
@@ -343,95 +398,42 @@ PanelWindow {
                 Behavior on opacity { NumberAnimation { duration: Theme.tHover } }
             }
         }
-        property real canLock: bar.cell !== null ? 1 : 0
-        Behavior on canLock { NumberAnimation { duration: Theme.tHover } }
-        Glyph {
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: bar.railY0 + Theme.s4; height: bar.lockRow - 2
-            text: "󰌿"; size: 13; color: headArea.containsMouse ? Theme.paper : Theme.fixer
-            opacity: (1 - bar.headT) * top.canLock
-            Behavior on color { ColorAnimation { duration: Theme.tHover } }
-        }
-        Glyph {
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: bar.railY0 + Theme.s4; height: bar.lockRow - 2
-            text: "󰌾"; size: 13; color: Theme.darkroom
-            opacity: bar.headT
-        }
-        MouseArea {
-            id: headArea
-            width: parent.width; height: bar.stripY - Theme.s4
-            hoverEnabled: true
-            enabled: bar.locked || bar.cell !== null
-            onClicked: bar.toggleLock()
-            onContainsMouseChanged: containsMouse ? bar.tip(monogram, bar.rollTip()) : bar.untip()
-        }
-        Connections {
-            target: bar
-            function onLockedChanged() { if (headArea.containsMouse) bar.tip(monogram, bar.rollTip()); }
+
+        Rectangle {
+            id: rail
+            y: bar.railY0
+            width: 36; height: parent.height - y
+            radius: Theme.rSheet - 2
+            color: Theme.pencil
+            Glyph {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: Theme.s4; height: bar.lockH - 2
+                text: "󰌾"; size: 13; color: Theme.darkroom
+            }
+            Item {
+                id: railFrames
+                y: bar.framesY
+                width: 36; height: parent.height - y - Theme.s4
+                Flickable {
+                    id: railFlick
+                    anchors.fill: parent
+                    clip: true
+                    interactive: false
+                    contentWidth: width; contentHeight: railCol.height
+                    PipColumn { id: railCol; items: bar.railItems; onRail: true }
+                }
+                ScrollEdges { anchors.fill: parent; flick: railFlick; step: bar.pipStep; fadeColor: Theme.pencil }
+            }
         }
 
-        // Fixed rows. A spare dozen are kept so a new workspace fades into an
-        // existing row instead of rebuilding the column.
-        Repeater {
-            model: Math.max(12, bar.rowCount)
-            Item {
-                id: row
-                required property int index
-                readonly property var u: bar.spaceItems[index] ?? null
-                readonly property var l: bar.railItems[index] ?? null
-                // The digit turns once the rail reaches its row and then
-                // cross-fades over 120 ms: a rail edge moving 15 px a frame
-                // would otherwise swap a digit within a frame or two.
-                readonly property bool reached: bar.rowT(index) >= 0.5
-                property real t: reached ? 1 : 0
-                Behavior on t { NumberAnimation { duration: Theme.tHover; easing.type: Easing.OutCubic } }
-                readonly property var mine: bar.locked ? l : u
-                readonly property real cover: block.opacity * bar.clamp01(1 - Math.abs(block.y - y) / 28)
-                // Same label and role in both lists: one digit that changes
-                // colour, so nothing dims halfway through.
-                readonly property bool same: u !== null && l !== null && u.label === l.label && u.current === l.current
-                x: 4; y: bar.stripY + index * bar.pipStep
-                width: 28; height: 28
-                Rectangle {
-                    anchors.fill: parent; radius: Theme.rFrame
-                    color: !rowMouse.containsMouse || row.mine === null || row.mine.current ? "transparent"
-                        : bar.mix(Theme.hover, Qt.rgba(0.102, 0.098, 0.090, 0.14), bar.lockT)
-                    Behavior on color { ColorAnimation { duration: Theme.tHover } }
-                }
-                Digit {
-                    text: row.u ? row.u.label : ""
-                    cover: row.cover
-                    big: row.u && row.u.current ? row.cover : 0
-                    rest: {
-                        const r = row.u && row.u.filled ? Theme.paper : Theme.fixer;
-                        return row.same ? bar.mix(r, row.l.filled ? Theme.darkroom : bar.dimDarkroom, row.t) : r;
-                    }
-                    hot: row.same ? bar.mix(Theme.darkroom, Theme.pencil, row.t) : Theme.darkroom
-                    opacity: row.same ? 1 : 1 - row.t
-                }
-                Digit {
-                    text: row.l ? row.l.label : ""
-                    cover: row.cover
-                    big: row.l && row.l.current ? row.cover : 0
-                    rest: row.l && !row.l.filled ? bar.dimDarkroom : Theme.darkroom
-                    hot: Theme.pencil
-                    opacity: row.same ? 0 : row.t
-                }
-                // Pin: a spawned process tree is stuck to this frame.
-                Glyph { anchors.right: parent.right; anchors.top: parent.top; anchors.rightMargin: -3; anchors.topMargin: -5; visible: row.l !== null && row.l.stuck; opacity: row.t; text: "󰐃"; size: 12; color: Theme.darkroom }
-                MouseArea {
-                    id: rowMouse; anchors.fill: parent; hoverEnabled: true
-                    enabled: row.mine !== null
-                    onClicked: {
-                        const it = row.mine;
-                        if (!it) return;
-                        if (it.current) Quickshell.execDetached(["qs", "-p", Quickshell.shellDir, "ipc", "call", "grid", "toggle"]);
-                        else if (bar.locked) Services.Hyprnav.gotoSlot(it.frame.environment_id, it.frame.slot_index);
-                        else Services.Hyprnav.gotoPhysical(it.id);
-                    }
-                }
-            }
+        // Monogram and lock: unlock.
+        MouseArea {
+            id: headArea
+            width: parent.width; height: bar.railY0 + bar.framesY
+            hoverEnabled: true
+            enabled: bar.hasLock
+            onClicked: Services.Hyprnav.unlock()
+            onContainsMouseChanged: containsMouse ? bar.tip(monogram, bar.railTitle + " (locked)\nClick to unlock") : bar.untip()
         }
     }
 

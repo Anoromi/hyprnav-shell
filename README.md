@@ -28,35 +28,36 @@ Design direction: a photographer's contact sheet. See [design/DIRECTION.md](desi
   the end of the roll of the environment that owns it, and nowhere else: a
   child roll inherits its ancestors' numbered frames but not their temporary
   ones.
-- **Bar**: a 44 px column on the left edge of every screen. On top, the
-  workspace selector (each screen's bar follows the workspace on that
-  screen). Unlocked, it lists every Hyprland workspace on the screen, ids 1
-  and up in id order, from Quickshell's `Hyprland.workspaces` (it follows
-  the compositor's create, destroy and focus events, and each workspace's
-  windows, without polling): the current one in a Pencil block, occupied
-  ones in Paper, empty ones in Fixer. Special workspaces and hyprnav's
-  managed workspaces (101 and up) are left out, except the one on screen,
-  which is listed last under its frame number in its roll instead of the
-  raw id. Clicking a number goes there (`workspace_goto_physical`); an open
-  lock above the list locks the current workspace's roll. Locked (the
-  current workspace belongs to the locked roll): the roll's monogram (the
-  initials of the first two words of the environment title that are not
-  "and", "of", "the" and the like, or the first two letters of a one-word
-  title; rolls that would share one all get a digit, numbered in
+- **Bar**: a 44 px column on the left edge of every screen. The workspace
+  selector is two groups, both pure functions of state (each screen's bar
+  follows the workspace on that screen). At the top, always: every Hyprland
+  workspace on the screen with an id from 1 to 99, in id order, from
+  Quickshell's `Hyprland.workspaces` (it follows the compositor's create,
+  destroy and focus events, and each workspace's windows, without polling):
+  the current one in a Pencil block, occupied ones in Paper, empty ones in
+  Fixer. Special workspaces and hyprnav's managed workspaces (100 and up)
+  never get a number there. Clicking one goes there
+  (`workspace_goto_physical`); hovering one that is a roll's frame names the
+  roll, and right-clicking it locks that roll (`lock_set`), the one way to
+  lock from the bar. In the middle of the free space between that list and
+  the bottom cluster, only while hyprnav holds a lock: the locked roll's
+  monogram (the initials of the first two words of the environment title
+  that are not "and", "of", "the" and the like, or the first two letters of
+  a one-word title; rolls that would share one all get a digit, numbered in
   environment id order) over its numbered frames on a Pencil rail with a
-  lock at its head, digits in Darkroom, the current frame inverted to a
-  Darkroom block. Switching modes never moves a digit: the rows keep fixed
-  positions, the column keeps room for the longer list, the rail grows out
-  from behind the current frame over the group (160 ms, ease out cubic)
-  and each digit cross-fades to its locked colour as the rail reaches it; a
-  row whose number differs between the lists cross-fades in place, and
-  unlocking runs it back. Digits take the block's colour as it slides over
-  them. Hovering the head names the roll; clicking the monogram unlocks
-  (`lock_set` / `lock_clear`), clicking the current number opens the grid.
-  Temporary frames are left out. The daemon records the environment of
-  every focused workspace as the lock, so the rail is the usual state on a
-  roll's workspace and the full list shows after an unlock or on a
-  workspace outside the locked roll. At
+  lock at its head, digits in Darkroom, the frame on screen inverted to a
+  Darkroom block. It fades and grows in place when a lock appears and
+  shrinks away when it goes (160 ms, ease out cubic); the top list never
+  moves. Clicking a frame goes there (`workspace_goto`), clicking the
+  monogram or the lock unlocks (`lock_clear`), clicking the current number
+  in either group opens the grid. The workspace on screen is marked in both
+  groups when it is one of the roll's frames. Temporary frames are left
+  out. When the list is taller than the room the rail leaves it, the list
+  clips and scrolls on the wheel (soft edges, a position hair, the current
+  workspace kept in view) down to two rows before the rail shrinks; the
+  rail scrolls the same way after that. The daemon records the roll of a
+  workspace reached through hyprnav as the lock, so the rail is the usual
+  state. At
   the bottom, on one 28 px rhythm: launcher and
   clipboard buttons (vicinae), the tray (icons drawn flat in Paper), the
   notification bell, the Wi-Fi/Bluetooth/sound/battery cluster that opens
@@ -173,7 +174,7 @@ scripts/               lab.py, seed.sh, run.sh, record.sh, demo.sh, headless.sh,
                        sticking-test.sh, sticking-demo.sh (hyprnav hard-sticking checks),
                        agent-demo + agent-demo-app.py (GTK4 demo agent: countdown, then an approval dialog),
                        tray-test.py (a StatusNotifierItem with a menu), bar-demo.sh (bar clip),
-                       bar-selector-demo.sh (workspace selector: all workspaces, lock rail),
+                       bar-selector-demo.sh (workspace selector: the list and the locked roll),
                        bar-polish-demo.sh (control centre speed, click-away, motion)
 lab-tools/             nix expression for the lab compositor tools (self-contained):
                        cage, the virtual seat, hns-lab-scroll (pointer moves,

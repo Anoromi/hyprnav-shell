@@ -76,7 +76,7 @@ Singleton {
     readonly property int tFast: reducedMotion ? 0 : 90
     readonly property int tScrim: reducedMotion ? 0 : 120
     readonly property int tRise: reducedMotion ? 0 : 160
-    // Bar selector: the lock rail growing over the group.
+    // Bar selector: the locked roll fading and growing in the middle.
     readonly property int tLock: reducedMotion ? 0 : 160
     readonly property int tStagger: reducedMotion ? 0 : 12
     // Switcher and grid: they sit on the path from a key press to the next

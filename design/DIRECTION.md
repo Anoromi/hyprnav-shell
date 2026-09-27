@@ -73,20 +73,22 @@ Emulsion fill with the launch command name in Fixer. Inherited slots have a
 dashed border. The locked roll has a small Pencil tick after its title.
 
 Bar: a 44 px column on the left edge, the film strip's edge. Top: the
-workspace selector. Unlocked, it is every workspace on the screen, 1 and up
-in id order, the current one in a Pencil block, occupied ones in Paper,
-empty ones in Fixer; special and hyprnav-managed workspaces (101 and up) are
-left out unless on screen, and then the managed one is listed last under its
-frame number, never as "101". No initials; an open lock at the head offers to
-keep the current roll. Locked, the roll's initials in Casual sit above its
-frame numbers on a Pencil rail with a lock at its head, the grease-pencil
-mark along a chosen strip, and the current frame inverts. The two are one
-column of fixed rows: locking draws the rail out from behind the current
-frame over the group (160 ms, ease out cubic) and each digit takes its locked
-colour as the pencil reaches it; numbers that differ cross-fade in place,
-nothing moves or reflows, and the column keeps room for the longer list.
-Unlocking rubs the mark back into the block. No title along the edge:
-sideways text at bar width does not read; hovering the head names the roll.
+workspace selector, two groups shown at once. At the top, always, every
+workspace on the screen with an id from 1 to 99 in id order, the current one
+in a Pencil block, occupied ones in Paper, empty ones in Fixer; special and
+hyprnav-managed workspaces (100 and up) get no number. In the middle of the
+free space below it, only while hyprnav holds a lock, the locked roll: its
+initials in Casual above its frame numbers on a Pencil rail with a lock at
+its head, the grease-pencil mark along a chosen strip, and the frame on
+screen inverts. The two never share a row, so there is nothing to morph: the
+rail fades and grows in place when a lock appears (160 ms, ease out cubic)
+and shrinks away when it goes, and the list above never moves. The workspace
+on screen is marked in both groups when the roll holds it. Locking from the
+bar is a right-click on a number that is a roll's frame; clicking the
+initials or the lock unlocks. A list too long for the room scrolls on the
+wheel behind soft edges before the rail gives up space. No title along the
+edge: sideways text at bar width does not read; hovering the head names the
+roll.
 Bottom: tray, network,
 bluetooth, audio, battery, then the clock stacked HH over mm. Quick settings
 open as one sheet beside the bar, bottom left.
