@@ -58,13 +58,18 @@ ShellRoot {
         model: root.hasComponent("switcher") ? root.screens : []
         Switcher {}
     }
-    function switcherWin() { return switchers.instances[0] ?? null; }
+    // One overlay at a time: keys go to the one already up, otherwise to
+    // the focused screen.
+    function overlayWin(variants) {
+        return variants.instances.find(w => w.phase !== "closed") ?? focused(variants);
+    }
+    function switcherWin() { return overlayWin(switchers); }
     Variants {
         id: grids
         model: root.hasComponent("grid") ? root.screens : []
         Grid {}
     }
-    function gridWin() { return grids.instances[0] ?? null; }
+    function gridWin() { return overlayWin(grids); }
     Variants {
         id: quick
         model: root.hasComponent("qs") ? root.screens : []
