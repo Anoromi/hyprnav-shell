@@ -174,8 +174,27 @@ Singleton {
 
     // Public API
     function refreshAll() { refreshStatus(); refreshGrid(); }
+    // The compact snapshot sends each row's environment fields once; put them
+    // back on the cells (shared, not copied) so readers see the full shape.
+    function _expandGrid(res) {
+        if (!res.rows) return res;
+        const byRow = {};
+        for (const r of res.rows) byRow[r.row_index] = r;
+        for (const c of res.items) {
+            const r = byRow[c.row_index];
+            if (r) {
+                c.environment_id = r.environment_id;
+                c.environment_display_id = r.environment_display_id;
+                c.environment_title = r.environment_title;
+                c.environment_locked = r.environment_locked;
+                c.environment_chain = r.environment_chain;
+            }
+            c.locked_environment_id = res.locked_environment_id;
+        }
+        return res;
+    }
     function refreshGrid(cb) {
-        request("ui_snapshot_grid", { cwd: null }, (res, err, unchanged) => { if (res && !unchanged) { grid = res; gridUpdated(); } if (cb) cb(res, err); });
+        request("ui_snapshot_grid", { cwd: null, compact: true }, (res, err, unchanged) => { if (res && !unchanged) { grid = _expandGrid(res); gridUpdated(); } if (cb) cb(res, err); });
     }
     // `_reverse` records the direction the daemon's `initial_index` was
     // chosen for, so a cached snapshot is only trusted for that direction.

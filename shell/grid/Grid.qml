@@ -396,209 +396,219 @@ PanelWindow {
                         // the ones below; never on open.
                         Behavior on y { enabled: win.open && content.opacity === 1; NumberAnimation { duration: Theme.tSnap; easing.type: Easing.OutCubic } }
 
-                        // Title, the ancestors it sits in ("in Proj › main"), then a
-                        // lock when any level of the chain is locked.
-                        Row {
-                            id: header
-                            spacing: Theme.s12
-                            height: win.titleH
-                            width: parent.width
-                            Text {
-                                id: rowTitle
-                                width: Math.min(implicitWidth, header.width * 0.6)
-                                elide: Text.ElideRight
-                                text: rowItem.modelData.title
-                                color: rowItem.index === win.selRow ? Theme.paper : Theme.fixer
-                                font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
-                            }
-                            Text {
-                                visible: rowItem.modelData.breadcrumb.length > 0
-                                anchors.baseline: rowTitle.baseline
-                                width: Math.min(implicitWidth, header.width - rowTitle.width - 60)
-                                elide: Text.ElideRight
-                                text: "in " + rowItem.modelData.breadcrumb.join(" › ")
-                                color: Theme.fixer
-                                font.family: Theme.sans; font.pixelSize: Theme.fs13
-                            }
-                            // Last in the row, so locking or unlocking (Shift+L)
-                            // never slides the breadcrumb sideways.
-                            Glyph {
-                                visible: rowItem.modelData.locked
-                                anchors.verticalCenter: rowTitle.verticalCenter
-                                text: "󰌾"
-                                size: 15
-                                color: Theme.pencil
-                            }
-                        }
-
-                        Repeater {
-                            model: rowItem.modelData.cells
-                            delegate: Item {
-                                id: cellItem
-                                required property var modelData
-                                required property int index
-                                // The GridCell outlives snapshots; only `snapshot` changes.
-                                readonly property var cell: modelData.snapshot
-                                // The agent comes from the pushed registry, so a beat
-                                // updates this row alone and never the whole grid.
-                                readonly property var agent: Services.Hyprnav.agentFor(cell.physical_workspace_id) ?? cell.agent ?? null
-                                readonly property bool isSelected: rowItem.index === win.selRow && index === win.selCol
-                                readonly property bool hasWindows: cell.window_count > 0
-                                readonly property string launchName: {
-                                    if (cell.subtitle && cell.subtitle.indexOf("Workspace") !== 0) return cell.subtitle;
-                                    return "";
-                                }
-                                x: (index % win.cols) * (win.cellW + win.gap)
-                                y: win.titleH + Math.floor(index / win.cols) * win.lineH
-                                width: win.cellW
-                                height: win.cellH + win.nameH
-
-                                Rectangle {
-                                    id: frame
-                                    width: win.cellW; height: win.cellH
-                                    radius: Theme.rFrame
-                                    color: cellItem.hasWindows ? Theme.sheet : Theme.emulsion
-                                    border.width: cellItem.cell.temporary ? 0 : 1
-                                    border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, cellItem.hasWindows ? 0.35 : 0.12)
-                                    Shape {
-                                        anchors.fill: parent
-                                        visible: cellItem.cell.temporary === true
-                                        ShapePath {
-                                            strokeColor: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.4)
-                                            strokeWidth: 1
-                                            fillColor: "transparent"
-                                            strokeStyle: ShapePath.DashLine
-                                            dashPattern: [4, 4]
-                                            startX: 0.5; startY: 0.5
-                                            PathLine { x: win.cellW - 0.5; y: 0.5 }
-                                            PathLine { x: win.cellW - 0.5; y: win.cellH - 0.5 }
-                                            PathLine { x: 0.5; y: win.cellH - 0.5 }
-                                            PathLine { x: 0.5; y: 0.5 }
-                                        }
-                                    }
-                                    WorkspaceThumb {
-                                        anchors.fill: parent; anchors.margins: 3
-                                        workspaceId: cellItem.cell.physical_workspace_id
-                                        // A hidden row still holds its captures unless
-                                        // they are dropped here; with hundreds of rolls
-                                        // that ran out of fds and pinned the GPU.
-                                        live: win.capturing && rowItem.visible
-                                        emptyText: cellItem.hasWindows ? "" : (cellItem.cell.subtitle && cellItem.cell.subtitle.indexOf("Workspace") !== 0 ? "Opens " + cellItem.cell.subtitle : "Empty frame")
-                                    }
-                                    // Pin: a spawned process tree is stuck to this frame.
-                                    Glyph {
-                                        anchors.right: parent.right; anchors.top: parent.top
-                                        anchors.rightMargin: 8; anchors.topMargin: 6
-                                        visible: cellItem.cell.stuck === true
-                                        text: "󰐃"
-                                        size: 14
-                                        color: Theme.pencil
-                                    }
-                                    // Frame number, film-edge style. Temporary slots have no
-                                    // number: they carry their name in Casual instead.
-                                    Rectangle {
-                                        x: 6; y: 6
-                                        width: Math.min(num.implicitWidth + 10, win.cellW - 36); height: 20
-                                        radius: 2
-                                        color: cellItem.isSelected ? Theme.pencil : Theme.darkroom
-                                        Text {
-                                            id: num
-                                            anchors.centerIn: parent
-                                            width: Math.min(implicitWidth, parent.width - 10)
-                                            elide: Text.ElideRight
-                                            text: cellItem.cell.unnumbered ? cellItem.cell.workspace_name : cellItem.cell.slot_index
-                                            color: cellItem.isSelected ? Theme.darkroom : Theme.paper
-                                            font.family: cellItem.cell.unnumbered ? Theme.casual : Theme.mono
-                                            font.pixelSize: Theme.fs13; font.weight: Font.Medium
-                                        }
-                                    }
-                                    // Agent status: who is working in this frame and what it did last.
-                                    Row {
-                                        anchors.left: parent.left; anchors.bottom: parent.bottom
-                                        anchors.leftMargin: 6; anchors.bottomMargin: 6
-                                        spacing: 6
-                                        visible: cellItem.agent !== null && cellItem.agent !== undefined
-                                        Rectangle {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: 8; height: 8; radius: 4
-                                            color: cellItem.agent && cellItem.agent.state === "waiting_for_user" ? Theme.warn
-                                                 : cellItem.agent && cellItem.agent.state === "working" ? Theme.pencil : Theme.fixer
-                                            SequentialAnimation on opacity {
-                                                running: cellItem.agent && cellItem.agent.state === "working"; loops: Animation.Infinite
-                                                NumberAnimation { to: 0.3; duration: 500 } NumberAnimation { to: 1; duration: 500 }
-                                            }
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: win.cellW - 40
-                                            elide: Text.ElideRight
-                                            text: {
-                                                const a = cellItem.agent; if (!a) return "";
-                                                if (a.state === "waiting_for_user") return "needs you";
-                                                if (a.state === "finished") return "finished";
-                                                if (a.state === "idle") return "idle";
-                                                return a.last_action ? a.last_action : "working";
-                                            }
-                                            color: Theme.paper
-                                            font.family: Theme.sans; font.pixelSize: Theme.fs12
-                                        }
-                                    }
-                                    // Temporary slot empty timer
-                                    Row {
-                                        anchors.left: parent.left; anchors.bottom: parent.bottom
-                                        anchors.leftMargin: 6; anchors.bottomMargin: 6
-                                        spacing: 4
-                                        visible: cellItem.cell.temporary === true && cellItem.cell.empty_for_ms !== null && cellItem.cell.empty_for_ms !== undefined && !cellItem.agent
-                                        Glyph { text: "󰔟"; size: 12; color: Theme.fixer }
-                                        Text {
-                                            width: Math.min(implicitWidth, win.cellW - 32)
-                                            elide: Text.ElideRight
-                                            text: "empty " + Math.round((cellItem.cell.empty_for_ms || 0) / 1000) + " s, gone at 30"
-                                            color: Theme.fixer
-                                            font.family: Theme.sans; font.pixelSize: Theme.fs12
-                                        }
-                                    }
-                                    MouseArea {
-                                        id: cellMouse
-                                        anchors.fill: parent
-                                        enabled: win.open
-                                        hoverEnabled: true
-                                        // Neither a pointer resting where it was when the
-                                        // grid opened nor cells scrolled under it take the
-                                        // selection from the keys (see hoverEnter).
-                                        onEntered: win.hoverEnter(rowItem.index, cellItem.index)
-                                        onExited: win.hoverExit(rowItem.index, cellItem.index)
-                                        onPositionChanged: mouse => hoverGate.moved(cellMouse, mouse.x, mouse.y)
-                                        // A click is deliberate: it opens the frame under it.
-                                        onClicked: { win.pick(rowItem.index, cellItem.index); win.activate(); }
-                                    }
-                                }
+                        // Only rows near the viewport build their title and cells;
+                        // with hundreds of rolls, building every one cost seconds
+                        // and over a gigabyte. The row itself stays for layout.
+                        Loader {
+                            anchors.fill: parent
+                            active: rowItem.visible
+                            sourceComponent: Item {
+                                anchors.fill: parent
+                                // Title, the ancestors it sits in ("in Proj › main"), then a
+                                // lock when any level of the chain is locked.
                                 Row {
-                                    anchors.top: frame.bottom; anchors.topMargin: 7
-                                    spacing: Theme.s8
-                                    readonly property bool shared: (cellItem.cell.shared ?? cellItem.cell.inherited) === true
+                                    id: header
+                                    spacing: Theme.s12
+                                    height: win.titleH
+                                    width: parent.width
                                     Text {
-                                        width: win.cellW - (cellItem.cell.active ? 50 : 0) - (parent.shared ? sharedTag.implicitWidth + Theme.s8 : 0)
-                                        text: cellItem.agent ? ("agent: " + cellItem.agent.client) : cellItem.cell.unnumbered ? ("temporary" + (cellItem.cell.owner ? ", by " + cellItem.cell.owner : "")) : cellItem.cell.slot_display_name
+                                        id: rowTitle
+                                        width: Math.min(implicitWidth, header.width * 0.6)
                                         elide: Text.ElideRight
-                                        color: cellItem.isSelected ? Theme.paper : Theme.fixer
-                                        font.family: Theme.sans; font.pixelSize: Theme.fs13
-                                        font.weight: cellItem.isSelected ? Font.Medium : Font.Normal
+                                        text: rowItem.modelData.title
+                                        color: rowItem.index === win.selRow ? Theme.paper : Theme.fixer
+                                        font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
                                     }
-                                    // The same workspace every roll under this ancestor shows.
                                     Text {
-                                        id: sharedTag
-                                        visible: parent.shared
-                                        text: "shared"
+                                        visible: rowItem.modelData.breadcrumb.length > 0
+                                        anchors.baseline: rowTitle.baseline
+                                        width: Math.min(implicitWidth, header.width - rowTitle.width - 60)
+                                        elide: Text.ElideRight
+                                        text: "in " + rowItem.modelData.breadcrumb.join(" › ")
                                         color: Theme.fixer
-                                        opacity: 0.7
-                                        font.family: Theme.sans; font.pixelSize: Theme.fs12
-                                    }
-                                    Text {
-                                        visible: cellItem.cell.active
-                                        text: "here"
-                                        color: Theme.pencil
                                         font.family: Theme.sans; font.pixelSize: Theme.fs13
+                                    }
+                                    // Last in the row, so locking or unlocking (Shift+L)
+                                    // never slides the breadcrumb sideways.
+                                    Glyph {
+                                        visible: rowItem.modelData.locked
+                                        anchors.verticalCenter: rowTitle.verticalCenter
+                                        text: "󰌾"
+                                        size: 15
+                                        color: Theme.pencil
+                                    }
+                                }
+
+                                Repeater {
+                                    model: rowItem.modelData.cells
+                                    delegate: Item {
+                                        id: cellItem
+                                        required property var modelData
+                                        required property int index
+                                        // The GridCell outlives snapshots; only `snapshot` changes.
+                                        readonly property var cell: modelData.snapshot
+                                        // The agent comes from the pushed registry, so a beat
+                                        // updates this row alone and never the whole grid.
+                                        readonly property var agent: Services.Hyprnav.agentFor(cell.physical_workspace_id) ?? cell.agent ?? null
+                                        readonly property bool isSelected: rowItem.index === win.selRow && index === win.selCol
+                                        readonly property bool hasWindows: cell.window_count > 0
+                                        readonly property string launchName: {
+                                            if (cell.subtitle && cell.subtitle.indexOf("Workspace") !== 0) return cell.subtitle;
+                                            return "";
+                                        }
+                                        x: (index % win.cols) * (win.cellW + win.gap)
+                                        y: win.titleH + Math.floor(index / win.cols) * win.lineH
+                                        width: win.cellW
+                                        height: win.cellH + win.nameH
+
+                                        Rectangle {
+                                            id: frame
+                                            width: win.cellW; height: win.cellH
+                                            radius: Theme.rFrame
+                                            color: cellItem.hasWindows ? Theme.sheet : Theme.emulsion
+                                            border.width: cellItem.cell.temporary ? 0 : 1
+                                            border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, cellItem.hasWindows ? 0.35 : 0.12)
+                                            Shape {
+                                                anchors.fill: parent
+                                                visible: cellItem.cell.temporary === true
+                                                ShapePath {
+                                                    strokeColor: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.4)
+                                                    strokeWidth: 1
+                                                    fillColor: "transparent"
+                                                    strokeStyle: ShapePath.DashLine
+                                                    dashPattern: [4, 4]
+                                                    startX: 0.5; startY: 0.5
+                                                    PathLine { x: win.cellW - 0.5; y: 0.5 }
+                                                    PathLine { x: win.cellW - 0.5; y: win.cellH - 0.5 }
+                                                    PathLine { x: 0.5; y: win.cellH - 0.5 }
+                                                    PathLine { x: 0.5; y: 0.5 }
+                                                }
+                                            }
+                                            WorkspaceThumb {
+                                                anchors.fill: parent; anchors.margins: 3
+                                                workspaceId: cellItem.cell.physical_workspace_id
+                                                // A hidden row still holds its captures unless
+                                                // they are dropped here; with hundreds of rolls
+                                                // that ran out of fds and pinned the GPU.
+                                                live: win.capturing && rowItem.visible
+                                                emptyText: cellItem.hasWindows ? "" : (cellItem.cell.subtitle && cellItem.cell.subtitle.indexOf("Workspace") !== 0 ? "Opens " + cellItem.cell.subtitle : "Empty frame")
+                                            }
+                                            // Pin: a spawned process tree is stuck to this frame.
+                                            Glyph {
+                                                anchors.right: parent.right; anchors.top: parent.top
+                                                anchors.rightMargin: 8; anchors.topMargin: 6
+                                                visible: cellItem.cell.stuck === true
+                                                text: "󰐃"
+                                                size: 14
+                                                color: Theme.pencil
+                                            }
+                                            // Frame number, film-edge style. Temporary slots have no
+                                            // number: they carry their name in Casual instead.
+                                            Rectangle {
+                                                x: 6; y: 6
+                                                width: Math.min(num.implicitWidth + 10, win.cellW - 36); height: 20
+                                                radius: 2
+                                                color: cellItem.isSelected ? Theme.pencil : Theme.darkroom
+                                                Text {
+                                                    id: num
+                                                    anchors.centerIn: parent
+                                                    width: Math.min(implicitWidth, parent.width - 10)
+                                                    elide: Text.ElideRight
+                                                    text: cellItem.cell.unnumbered ? cellItem.cell.workspace_name : cellItem.cell.slot_index
+                                                    color: cellItem.isSelected ? Theme.darkroom : Theme.paper
+                                                    font.family: cellItem.cell.unnumbered ? Theme.casual : Theme.mono
+                                                    font.pixelSize: Theme.fs13; font.weight: Font.Medium
+                                                }
+                                            }
+                                            // Agent status: who is working in this frame and what it did last.
+                                            Row {
+                                                anchors.left: parent.left; anchors.bottom: parent.bottom
+                                                anchors.leftMargin: 6; anchors.bottomMargin: 6
+                                                spacing: 6
+                                                visible: cellItem.agent !== null && cellItem.agent !== undefined
+                                                Rectangle {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 8; height: 8; radius: 4
+                                                    color: cellItem.agent && cellItem.agent.state === "waiting_for_user" ? Theme.warn
+                                                         : cellItem.agent && cellItem.agent.state === "working" ? Theme.pencil : Theme.fixer
+                                                    SequentialAnimation on opacity {
+                                                        running: cellItem.agent && cellItem.agent.state === "working"; loops: Animation.Infinite
+                                                        NumberAnimation { to: 0.3; duration: 500 } NumberAnimation { to: 1; duration: 500 }
+                                                    }
+                                                }
+                                                Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: win.cellW - 40
+                                                    elide: Text.ElideRight
+                                                    text: {
+                                                        const a = cellItem.agent; if (!a) return "";
+                                                        if (a.state === "waiting_for_user") return "needs you";
+                                                        if (a.state === "finished") return "finished";
+                                                        if (a.state === "idle") return "idle";
+                                                        return a.last_action ? a.last_action : "working";
+                                                    }
+                                                    color: Theme.paper
+                                                    font.family: Theme.sans; font.pixelSize: Theme.fs12
+                                                }
+                                            }
+                                            // Temporary slot empty timer
+                                            Row {
+                                                anchors.left: parent.left; anchors.bottom: parent.bottom
+                                                anchors.leftMargin: 6; anchors.bottomMargin: 6
+                                                spacing: 4
+                                                visible: cellItem.cell.temporary === true && cellItem.cell.empty_for_ms !== null && cellItem.cell.empty_for_ms !== undefined && !cellItem.agent
+                                                Glyph { text: "󰔟"; size: 12; color: Theme.fixer }
+                                                Text {
+                                                    width: Math.min(implicitWidth, win.cellW - 32)
+                                                    elide: Text.ElideRight
+                                                    text: "empty " + Math.round((cellItem.cell.empty_for_ms || 0) / 1000) + " s, gone at 30"
+                                                    color: Theme.fixer
+                                                    font.family: Theme.sans; font.pixelSize: Theme.fs12
+                                                }
+                                            }
+                                            MouseArea {
+                                                id: cellMouse
+                                                anchors.fill: parent
+                                                enabled: win.open
+                                                hoverEnabled: true
+                                                // Neither a pointer resting where it was when the
+                                                // grid opened nor cells scrolled under it take the
+                                                // selection from the keys (see hoverEnter).
+                                                onEntered: win.hoverEnter(rowItem.index, cellItem.index)
+                                                onExited: win.hoverExit(rowItem.index, cellItem.index)
+                                                onPositionChanged: mouse => hoverGate.moved(cellMouse, mouse.x, mouse.y)
+                                                // A click is deliberate: it opens the frame under it.
+                                                onClicked: { win.pick(rowItem.index, cellItem.index); win.activate(); }
+                                            }
+                                        }
+                                        Row {
+                                            anchors.top: frame.bottom; anchors.topMargin: 7
+                                            spacing: Theme.s8
+                                            readonly property bool shared: (cellItem.cell.shared ?? cellItem.cell.inherited) === true
+                                            Text {
+                                                width: win.cellW - (cellItem.cell.active ? 50 : 0) - (parent.shared ? sharedTag.implicitWidth + Theme.s8 : 0)
+                                                text: cellItem.agent ? ("agent: " + cellItem.agent.client) : cellItem.cell.unnumbered ? ("temporary" + (cellItem.cell.owner ? ", by " + cellItem.cell.owner : "")) : cellItem.cell.slot_display_name
+                                                elide: Text.ElideRight
+                                                color: cellItem.isSelected ? Theme.paper : Theme.fixer
+                                                font.family: Theme.sans; font.pixelSize: Theme.fs13
+                                                font.weight: cellItem.isSelected ? Font.Medium : Font.Normal
+                                            }
+                                            // The same workspace every roll under this ancestor shows.
+                                            Text {
+                                                id: sharedTag
+                                                visible: parent.shared
+                                                text: "shared"
+                                                color: Theme.fixer
+                                                opacity: 0.7
+                                                font.family: Theme.sans; font.pixelSize: Theme.fs12
+                                            }
+                                            Text {
+                                                visible: cellItem.cell.active
+                                                text: "here"
+                                                color: Theme.pencil
+                                                font.family: Theme.sans; font.pixelSize: Theme.fs13
+                                            }
+                                        }
                                     }
                                 }
                             }
