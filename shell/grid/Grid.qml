@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Shapes
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
@@ -237,15 +238,15 @@ PanelWindow {
     readonly property int contentH: Math.max(0, stackH - rowGap)
     // The viewport: the window minus the top margin and the room the hint line
     // needs at the bottom.
-    readonly property int topInset: 80
-    readonly property int bottomInset: 80
+    readonly property int topInset: 24
+    readonly property int bottomInset: 40
     readonly property int viewportH: Math.max(0, height - topInset - bottomInset)
     // Taller than the viewport: pin the stack to the top and scroll it.
     readonly property int rowsTop: Math.max(topInset, Math.round((height - stackH + rowGap) / 2))
     readonly property int maxScroll: Math.max(0, contentH - viewportH)
-    // The soft edges are 48 px deep, so a selection parked one `rowGap` from
+    // The soft edges are `fadeH` deep, so a selection parked one `rowGap` from
     // the edge would sit under one. Keep the ring clear of both.
-    readonly property int fadeH: 48
+    readonly property int fadeH: 28
     readonly property int scrollMargin: Math.max(rowGap, fadeH)
     property real scrollY: 0
     // Animate the slide, except on open, where the grid must appear already
@@ -367,12 +368,40 @@ PanelWindow {
         onOpacityChanged: if (opacity === 1 && perf.enabled) console.info("[perf] grid opaque at " + Date.now())
         Rectangle { anchors.fill: parent; color: Theme.oScrim }
 
+        // Alpha mask for the viewport's soft edges (see layer.effect below).
+        Item {
+            id: edgeMask
+            x: 0; y: win.topInset
+            width: win.width; height: win.viewportH
+            visible: false
+            layer.enabled: true
+            readonly property real f: height > 0 ? Math.min(0.5, win.fadeH / height) : 0
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0; color: Qt.rgba(0, 0, 0, win.canScrollUp ? 0 : 1) }
+                    GradientStop { position: edgeMask.f; color: "black" }
+                    GradientStop { position: 1 - edgeMask.f; color: "black" }
+                    GradientStop { position: 1; color: Qt.rgba(0, 0, 0, win.canScrollDown ? 0 : 1) }
+                }
+            }
+        }
+
         // The viewport: the stack scrolls inside it, the ring travels with it.
         Item {
             id: viewport
             x: 0; y: win.topInset
             width: win.width; height: win.viewportH
             clip: true
+            // Content fades out to the glass at an edge the stack continues
+            // past, instead of a tinted band painted over it.
+            layer.enabled: win.maxScroll > 0
+            layer.effect: MultiEffect {
+                maskEnabled: true
+                maskSource: edgeMask
+                maskThresholdMin: 0.0
+                maskSpreadAtMin: 1.0
+            }
 
             Item {
                 id: scroller
@@ -640,28 +669,6 @@ PanelWindow {
                 }
             }   // scroller
 
-            // Soft edges, only where the stack continues out of sight.
-            Rectangle {
-                width: parent.width; height: win.fadeH
-                anchors.top: parent.top
-                gradient: Gradient {
-                    GradientStop { position: 0; color: Theme.oScrim }
-                    GradientStop { position: 1; color: Qt.rgba(Theme.oScrim.r, Theme.oScrim.g, Theme.oScrim.b, 0) }
-                }
-                opacity: win.canScrollUp ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
-            }
-            Rectangle {
-                width: parent.width; height: win.fadeH
-                anchors.bottom: parent.bottom
-                gradient: Gradient {
-                    GradientStop { position: 0; color: Qt.rgba(Theme.oScrim.r, Theme.oScrim.g, Theme.oScrim.b, 0) }
-                    GradientStop { position: 1; color: Theme.oScrim }
-                }
-                opacity: win.canScrollDown ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
-            }
-
             // Where we are in the stack: a hair on the right edge, gone once the
             // grid has been still for a moment. No scrollbar.
             Rectangle {
@@ -788,7 +795,7 @@ PanelWindow {
     Text {
         style: Text.Outline; styleColor: Theme.oHalo
         x: win.inset
-        y: win.height - 60
+        y: win.height - win.bottomInset + Math.round((win.bottomInset - height) / 2)
         text: "Enter opens the frame.  Ctrl+P for actions.  Esc closes.  󰐃 marks a stuck tree."
         color: Theme.oFixer
         font.family: Theme.sans; font.pixelSize: Theme.fs13
