@@ -478,7 +478,10 @@ PanelWindow {
                                     WorkspaceThumb {
                                         anchors.fill: parent; anchors.margins: 3
                                         workspaceId: cellItem.cell.physical_workspace_id
-                                        live: win.capturing
+                                        // A hidden row still holds its captures unless
+                                        // they are dropped here; with hundreds of rolls
+                                        // that ran out of fds and pinned the GPU.
+                                        live: win.capturing && rowItem.visible
                                         emptyText: cellItem.hasWindows ? "" : (cellItem.cell.subtitle && cellItem.cell.subtitle.indexOf("Workspace") !== 0 ? "Opens " + cellItem.cell.subtitle : "Empty frame")
                                     }
                                     // Pin: a spawned process tree is stuck to this frame.
