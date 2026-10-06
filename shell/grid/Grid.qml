@@ -365,7 +365,7 @@ PanelWindow {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
         onOpacityChanged: if (opacity === 1 && perf.enabled) console.info("[perf] grid opaque at " + Date.now())
-        Rectangle { anchors.fill: parent; color: Theme.scrim }
+        Rectangle { anchors.fill: parent; color: Theme.oScrim }
 
         // The viewport: the stack scrolls inside it, the ring travels with it.
         Item {
@@ -416,7 +416,7 @@ PanelWindow {
                                         width: Math.min(implicitWidth, header.width * 0.6)
                                         elide: Text.ElideRight
                                         text: rowItem.modelData.title
-                                        color: rowItem.index === win.selRow ? Theme.paper : Theme.fixer
+                                        color: rowItem.index === win.selRow ? Theme.oPaper : Theme.oFixer
                                         font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
                                     }
                                     Text {
@@ -425,7 +425,7 @@ PanelWindow {
                                         width: Math.min(implicitWidth, header.width - rowTitle.width - 60)
                                         elide: Text.ElideRight
                                         text: "in " + rowItem.modelData.breadcrumb.join(" › ")
-                                        color: Theme.fixer
+                                        color: Theme.oFixer
                                         font.family: Theme.sans; font.pixelSize: Theme.fs13
                                     }
                                     // Last in the row, so locking or unlocking (Shift+L)
@@ -435,7 +435,7 @@ PanelWindow {
                                         anchors.verticalCenter: rowTitle.verticalCenter
                                         text: "󰌾"
                                         size: 15
-                                        color: Theme.pencil
+                                        color: Theme.oPencil
                                     }
                                 }
 
@@ -465,14 +465,14 @@ PanelWindow {
                                             id: frame
                                             width: win.cellW; height: win.cellH
                                             radius: Theme.rFrame
-                                            color: cellItem.hasWindows ? Theme.sheet : Theme.emulsion
+                                            color: cellItem.hasWindows ? Theme.oSheet : Theme.oEmulsion
                                             border.width: cellItem.cell.temporary ? 0 : 1
-                                            border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, cellItem.hasWindows ? 0.35 : 0.12)
+                                            border.color: Qt.rgba(Theme.oPaper.r, Theme.oPaper.g, Theme.oPaper.b, cellItem.hasWindows ? 0.35 : 0.12)
                                             Shape {
                                                 anchors.fill: parent
                                                 visible: cellItem.cell.temporary === true
                                                 ShapePath {
-                                                    strokeColor: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.4)
+                                                    strokeColor: Qt.rgba(Theme.oPaper.r, Theme.oPaper.g, Theme.oPaper.b, 0.4)
                                                     strokeWidth: 1
                                                     fillColor: "transparent"
                                                     strokeStyle: ShapePath.DashLine
@@ -500,7 +500,7 @@ PanelWindow {
                                                 visible: cellItem.cell.stuck === true
                                                 text: "󰐃"
                                                 size: 14
-                                                color: Theme.pencil
+                                                color: Theme.oPencil
                                             }
                                             // Frame number, film-edge style. Temporary slots have no
                                             // number: they carry their name in Casual instead.
@@ -508,14 +508,14 @@ PanelWindow {
                                                 x: 6; y: 6
                                                 width: Math.min(num.implicitWidth + 10, win.cellW - 36); height: 20
                                                 radius: 2
-                                                color: cellItem.isSelected ? Theme.pencil : Theme.darkroom
+                                                color: cellItem.isSelected ? Theme.oPencil : Theme.oDarkroom
                                                 Text {
                                                     id: num
                                                     anchors.centerIn: parent
                                                     width: Math.min(implicitWidth, parent.width - 10)
                                                     elide: Text.ElideRight
                                                     text: cellItem.cell.unnumbered ? cellItem.cell.workspace_name : cellItem.cell.slot_index
-                                                    color: cellItem.isSelected ? Theme.darkroom : Theme.paper
+                                                    color: cellItem.isSelected ? Theme.oDarkroom : Theme.oPaper
                                                     font.family: cellItem.cell.unnumbered ? Theme.casual : Theme.mono
                                                     font.pixelSize: Theme.fs13; font.weight: Font.Medium
                                                 }
@@ -530,7 +530,7 @@ PanelWindow {
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     width: 8; height: 8; radius: 4
                                                     color: cellItem.agent && cellItem.agent.state === "waiting_for_user" ? Theme.warn
-                                                         : cellItem.agent && cellItem.agent.state === "working" ? Theme.pencil : Theme.fixer
+                                                         : cellItem.agent && cellItem.agent.state === "working" ? Theme.oPencil : Theme.oFixer
                                                     SequentialAnimation on opacity {
                                                         running: cellItem.agent && cellItem.agent.state === "working"; loops: Animation.Infinite
                                                         NumberAnimation { to: 0.3; duration: 500 } NumberAnimation { to: 1; duration: 500 }
@@ -547,7 +547,7 @@ PanelWindow {
                                                         if (a.state === "idle") return "idle";
                                                         return a.last_action ? a.last_action : "working";
                                                     }
-                                                    color: Theme.paper
+                                                    color: Theme.oPaper
                                                     font.family: Theme.sans; font.pixelSize: Theme.fs12
                                                 }
                                             }
@@ -557,12 +557,12 @@ PanelWindow {
                                                 anchors.leftMargin: 6; anchors.bottomMargin: 6
                                                 spacing: 4
                                                 visible: cellItem.cell.temporary === true && cellItem.cell.empty_for_ms !== null && cellItem.cell.empty_for_ms !== undefined && !cellItem.agent
-                                                Glyph { text: "󰔟"; size: 12; color: Theme.fixer }
+                                                Glyph { text: "󰔟"; size: 12; color: Theme.oFixer }
                                                 Text {
                                                     width: Math.min(implicitWidth, win.cellW - 32)
                                                     elide: Text.ElideRight
                                                     text: "empty " + Math.round((cellItem.cell.empty_for_ms || 0) / 1000) + " s, gone at 30"
-                                                    color: Theme.fixer
+                                                    color: Theme.oFixer
                                                     font.family: Theme.sans; font.pixelSize: Theme.fs12
                                                 }
                                             }
@@ -589,7 +589,7 @@ PanelWindow {
                                                 width: win.cellW - (cellItem.cell.active ? 50 : 0) - (parent.shared ? sharedTag.implicitWidth + Theme.s8 : 0)
                                                 text: cellItem.agent ? ("agent: " + cellItem.agent.client) : cellItem.cell.unnumbered ? ("temporary" + (cellItem.cell.owner ? ", by " + cellItem.cell.owner : "")) : cellItem.cell.slot_display_name
                                                 elide: Text.ElideRight
-                                                color: cellItem.isSelected ? Theme.paper : Theme.fixer
+                                                color: cellItem.isSelected ? Theme.oPaper : Theme.oFixer
                                                 font.family: Theme.sans; font.pixelSize: Theme.fs13
                                                 font.weight: cellItem.isSelected ? Font.Medium : Font.Normal
                                             }
@@ -598,14 +598,14 @@ PanelWindow {
                                                 id: sharedTag
                                                 visible: parent.shared
                                                 text: "shared"
-                                                color: Theme.fixer
+                                                color: Theme.oFixer
                                                 opacity: 0.7
                                                 font.family: Theme.sans; font.pixelSize: Theme.fs12
                                             }
                                             Text {
                                                 visible: cellItem.cell.active
                                                 text: "here"
-                                                color: Theme.pencil
+                                                color: Theme.oPencil
                                                 font.family: Theme.sans; font.pixelSize: Theme.fs13
                                             }
                                         }
@@ -628,7 +628,7 @@ PanelWindow {
                     height: win.cellH + pad * 2
                     radius: Theme.rFrame + pad
                     color: "transparent"
-                    border.color: Theme.pencil
+                    border.color: Theme.oPencil
                     border.width: Theme.ringWidth
                     Behavior on x { enabled: win.open && content.opacity === 1; NumberAnimation { duration: Theme.tSnap; easing.type: Easing.OutCubic } }
                     Behavior on y { enabled: win.open && content.opacity === 1; NumberAnimation { duration: Theme.tSnap; easing.type: Easing.OutCubic } }
@@ -640,8 +640,8 @@ PanelWindow {
                 width: parent.width; height: win.fadeH
                 anchors.top: parent.top
                 gradient: Gradient {
-                    GradientStop { position: 0; color: Theme.darkroom }
-                    GradientStop { position: 1; color: Qt.rgba(Theme.darkroom.r, Theme.darkroom.g, Theme.darkroom.b, 0) }
+                    GradientStop { position: 0; color: Theme.oDarkroom }
+                    GradientStop { position: 1; color: Qt.rgba(Theme.oDarkroom.r, Theme.oDarkroom.g, Theme.oDarkroom.b, 0) }
                 }
                 opacity: win.canScrollUp ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
@@ -650,8 +650,8 @@ PanelWindow {
                 width: parent.width; height: win.fadeH
                 anchors.bottom: parent.bottom
                 gradient: Gradient {
-                    GradientStop { position: 0; color: Qt.rgba(Theme.darkroom.r, Theme.darkroom.g, Theme.darkroom.b, 0) }
-                    GradientStop { position: 1; color: Theme.darkroom }
+                    GradientStop { position: 0; color: Qt.rgba(Theme.oDarkroom.r, Theme.oDarkroom.g, Theme.oDarkroom.b, 0) }
+                    GradientStop { position: 1; color: Theme.oDarkroom }
                 }
                 opacity: win.canScrollDown ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
@@ -666,7 +666,7 @@ PanelWindow {
                 radius: 1.5
                 height: Math.max(40, viewport.height * viewport.height / Math.max(1, win.contentH))
                 y: win.maxScroll <= 0 ? 0 : (viewport.height - height) * (win.scrollY / win.maxScroll)
-                color: Theme.fixer
+                color: Theme.oFixer
                 opacity: win.indicatorShown ? 0.9 : 0
                 Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
             }
@@ -784,7 +784,7 @@ PanelWindow {
         x: win.inset
         y: win.height - 60
         text: "Enter opens the frame.  Ctrl+P for actions.  Esc closes.  󰐃 marks a stuck tree."
-        color: Theme.fixer
+        color: Theme.oFixer
         font.family: Theme.sans; font.pixelSize: Theme.fs13
         opacity: content.opacity * 0.8
         visible: content.visible

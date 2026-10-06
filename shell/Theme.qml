@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
 Singleton {
     id: theme
@@ -16,6 +17,45 @@ Singleton {
     readonly property color good: "#8FBF7F"
     readonly property color warn: "#E06C4B"
     readonly property color scrim: Qt.rgba(0.102, 0.098, 0.090, 0.9)
+
+    // The switcher, grid and palette follow the desktop's light/dark choice;
+    // a near-black sheet over a light desktop was jarring. The bar and the
+    // other sheets keep the dark palette. `light` comes from the XDG portal's
+    // org.freedesktop.appearance color-scheme (1 = dark; 0 and 2 = light),
+    // the same setting theme-apply writes. Without a portal it stays dark.
+    property bool light: false
+    readonly property color oScrim: light ? Qt.rgba(0.937, 0.918, 0.886, 0.9) : scrim
+    readonly property color oDarkroom: light ? "#EFEAE2" : darkroom
+    readonly property color oSheet: light ? "#FBF9F5" : sheet
+    readonly property color oEmulsion: light ? "#E4DDD2" : emulsion
+    readonly property color oPaper: light ? "#2B2824" : paper
+    readonly property color oFixer: light ? "#6E685F" : fixer
+    readonly property color oPencil: light ? "#A8730A" : pencil
+
+    function _readScheme(text) {
+        const m = /uint32 (\d+)/.exec(text);
+        if (m) theme.light = m[1] !== "1";
+    }
+    Process {
+        id: schemeRead
+        running: true
+        command: ["gdbus", "call", "--session", "--dest", "org.freedesktop.portal.Desktop",
+            "--object-path", "/org/freedesktop/portal/desktop",
+            "--method", "org.freedesktop.portal.Settings.ReadOne", "org.freedesktop.appearance", "color-scheme"]
+        stdout: StdioCollector { onStreamFinished: theme._readScheme(text) }
+    }
+    Process {
+        id: schemeWatch
+        running: true
+        command: ["gdbus", "monitor", "--session", "--dest", "org.freedesktop.portal.Desktop",
+            "--object-path", "/org/freedesktop/portal/desktop"]
+        stdout: SplitParser {
+            onRead: line => { if (line.indexOf("'color-scheme'") >= 0) theme._readScheme(line); }
+        }
+        // The portal can restart (theme-apply restarts it); follow it back.
+        onExited: { schemeRetry.restart(); }
+    }
+    Timer { id: schemeRetry; interval: 3000; onTriggered: { schemeRead.running = true; schemeWatch.running = true; } }
 
     // Icon lookup that never asks for an empty name.
     function appIcon(cls) {

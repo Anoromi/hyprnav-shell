@@ -41,8 +41,8 @@ Item {
         width: parent.width
         implicitHeight: col.implicitHeight + Theme.s16
         radius: Theme.rSheet
-        color: Theme.sheet
-        border.color: Theme.pencil
+        color: Theme.oSheet
+        border.color: Theme.oPencil
         border.width: 2
         Column {
             id: col
@@ -50,7 +50,7 @@ Item {
             spacing: Theme.s4
             Rectangle {
                 width: parent.width; height: 40; radius: 6
-                color: Theme.darkroom
+                color: Theme.oDarkroom
                 Row {
                     anchors.fill: parent; anchors.leftMargin: Theme.s12; anchors.rightMargin: Theme.s12
                     spacing: Theme.s8
@@ -58,17 +58,17 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         visible: pal.pendingAction !== null
                         text: pal.pendingAction ? pal.pendingAction.prompt : ""
-                        color: Theme.pencil
+                        color: Theme.oPencil
                         font.family: Theme.sans; font.pixelSize: Theme.fs15
                     }
                     TextInput {
                         id: field
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width - (pal.pendingAction ? 200 : 0)
-                        color: Theme.paper
+                        color: Theme.oPaper
                         font.family: Theme.sans; font.pixelSize: Theme.fs15
-                        selectionColor: Theme.pencil; selectedTextColor: Theme.darkroom
-                        Text { visible: field.text === "" && !pal.pendingAction; text: "Type an action"; color: Theme.fixer; font: field.font }
+                        selectionColor: Theme.oPencil; selectedTextColor: Theme.oDarkroom
+                        Text { visible: field.text === "" && !pal.pendingAction; text: "Type an action"; color: Theme.oFixer; font: field.font }
                         Keys.onPressed: ev => {
                             if (ev.key === Qt.Key_Down) { pal.selected = Math.min(pal.filtered.length - 1, pal.selected + 1); ev.accepted = true; }
                             else if (ev.key === Qt.Key_Up) { pal.selected = Math.max(0, pal.selected - 1); ev.accepted = true; }
@@ -87,7 +87,7 @@ Item {
                     required property int index
                     readonly property bool on: index === pal.selected
                     width: col.width; height: 34; radius: 6
-                    color: on ? Theme.emulsion : "transparent"
+                    color: on ? Theme.oEmulsion : "transparent"
                     Row {
                         anchors.fill: parent; anchors.leftMargin: Theme.s12; anchors.rightMargin: Theme.s12
                         spacing: Theme.s12
@@ -95,13 +95,13 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             width: 90
                             text: row.modelData.scope
-                            color: Theme.fixer
+                            color: Theme.oFixer
                             font.family: Theme.sans; font.pixelSize: Theme.fs12
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             text: row.modelData.title
-                            color: row.on ? Theme.paper : Theme.fixer
+                            color: row.on ? Theme.oPaper : Theme.oFixer
                             font.family: Theme.sans; font.pixelSize: Theme.fs15
                             font.weight: row.on ? Font.Medium : Font.Normal
                         }
@@ -112,7 +112,7 @@ Item {
             Text {
                 visible: pal.filtered.length === 0 && !pal.pendingAction
                 text: "No action matches."
-                color: Theme.fixer
+                color: Theme.oFixer
                 font.family: Theme.sans; font.pixelSize: Theme.fs13
                 leftPadding: Theme.s12; topPadding: Theme.s4; bottomPadding: Theme.s4
             }

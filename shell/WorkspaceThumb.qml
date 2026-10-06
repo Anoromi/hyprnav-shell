@@ -69,7 +69,7 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 1
                 radius: 2
-                color: Theme.emulsion
+                color: Theme.oEmulsion
                 ScreencopyView {
                     id: view
                     anchors.fill: parent
@@ -106,7 +106,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             visible: root.emptyText !== ""
             text: root.emptyText
-            color: Theme.fixer
+            color: Theme.oFixer
             font.family: Theme.sans
             font.pixelSize: Theme.fs13
         }

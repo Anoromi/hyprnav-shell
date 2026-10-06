@@ -271,7 +271,7 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
         onOpacityChanged: if (opacity === 1 && perf.enabled) console.info("[perf] switcher opaque at " + Date.now())
 
-        Rectangle { anchors.fill: parent; color: Theme.scrim }
+        Rectangle { anchors.fill: parent; color: Theme.oScrim }
 
         // Frames
         Repeater {
@@ -292,9 +292,9 @@ PanelWindow {
                     id: frame
                     width: win.cardW; height: win.cardH
                     radius: Theme.rFrame
-                    color: Theme.sheet
+                    color: Theme.oSheet
                     border.width: 1
-                    border.color: Qt.rgba(Theme.paper.r, Theme.paper.g, Theme.paper.b, 0.35)
+                    border.color: Qt.rgba(Theme.oPaper.r, Theme.oPaper.g, Theme.oPaper.b, 0.35)
                     WorkspaceThumb {
                         anchors.fill: parent; anchors.margins: 3
                         workspaceId: card.modelData.workspace_id
@@ -307,7 +307,7 @@ PanelWindow {
                         visible: card.cell !== null && card.cell.stuck === true
                         text: "󰐃"
                         size: 14
-                        color: Theme.pencil
+                        color: Theme.oPencil
                     }
                     MouseArea {
                         id: cardMouse
@@ -328,14 +328,14 @@ PanelWindow {
                     Text {
                         text: card.cell ? (card.cell.unnumbered ? "" : card.cell.slot_index) : (card.index + 1)
                         visible: text !== ""
-                        color: card.isSelected ? Theme.pencil : Theme.fixer
+                        color: card.isSelected ? Theme.oPencil : Theme.oFixer
                         font.family: Theme.mono; font.pixelSize: Theme.fs15; font.weight: Font.Medium
                     }
                     Text {
                         width: win.cardW - 24
                         text: card.cell ? card.cell.slot_display_name : card.modelData.workspace_name
                         elide: Text.ElideRight
-                        color: card.isSelected ? Theme.paper : Theme.fixer
+                        color: card.isSelected ? Theme.oPaper : Theme.oFixer
                         font.family: Theme.sans; font.pixelSize: Theme.fs15
                         font.weight: card.isSelected ? Font.Medium : Font.Normal
                     }
@@ -354,7 +354,7 @@ PanelWindow {
             height: win.cardH + pad * 2
             radius: Theme.rFrame + pad
             color: "transparent"
-            border.color: Theme.pencil
+            border.color: Theme.oPencil
             border.width: Theme.ringWidth
             // No slide while hidden, so an open never shows the ring travelling.
             Behavior on x { enabled: win.open && content.opacity === 1; NumberAnimation { duration: Theme.tSnap; easing.type: Easing.OutCubic } }
@@ -370,7 +370,7 @@ PanelWindow {
             Text {
                 id: envTitle
                 text: win.selectedCell ? win.selectedCell.environment_title : (win.items[win.selected] ? win.items[win.selected].workspace_name : "")
-                color: Theme.paper
+                color: Theme.oPaper
                 font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
             }
             Text {
@@ -378,7 +378,7 @@ PanelWindow {
                 anchors.baseline: envTitle.baseline
                 visible: win.selectedCell && win.selectedCell.environment_locked
                 text: "locked"
-                color: Theme.pencil
+                color: Theme.oPencil
                 font.family: Theme.sans; font.pixelSize: Theme.fs13
             }
         }
