@@ -23,6 +23,7 @@ PanelWindow {
     screen: modelData
 
     property bool open: false
+    onOpenChanged: Services.Hyprnav.gridViewers += open ? 1 : -1
     property string phase: "closed"   // closed | open | activating | closing
     property int selRow: 0
     property int selCol: 0

@@ -31,6 +31,7 @@ Singleton {
     property var _socket: null
     property int _retryDelay: 200
 
+    property string _lastGridLine: ""
     function request(op, params, cb) {
         const body = Object.assign({ op: op }, params || {});
         _queue.push({ op: op, line: JSON.stringify(body) + "\n", cb: cb || null });
@@ -60,8 +61,16 @@ Singleton {
         const req = _inflight;
         _inflight = null;
         _closeSocket();
+        // The grid snapshot runs to megabytes and usually comes back byte for
+        // byte the same; parsing and re-syncing it froze the UI for ~230 ms.
+        if (req && req.op === "ui_snapshot_grid" && grid && line === _lastGridLine) {
+            if (req.cb) req.cb(grid, null, true);
+            Qt.callLater(_pump);
+            return;
+        }
         let parsed = null;
         try { parsed = JSON.parse(line); } catch (e) { lastError = "bad json: " + line.slice(0, 120); }
+        if (req && req.op === "ui_snapshot_grid" && parsed && parsed.ok) _lastGridLine = line;
         if (req && req.cb) {
             if (parsed && parsed.ok) req.cb(parsed.result, null);
             else req.cb(null, parsed && parsed.error ? parsed.error : { code: "unknown", message: line });
@@ -166,7 +175,7 @@ Singleton {
     // Public API
     function refreshAll() { refreshStatus(); refreshGrid(); }
     function refreshGrid(cb) {
-        request("ui_snapshot_grid", { cwd: null }, (res, err) => { if (res) { grid = res; gridUpdated(); } if (cb) cb(res, err); });
+        request("ui_snapshot_grid", { cwd: null }, (res, err, unchanged) => { if (res && !unchanged) { grid = res; gridUpdated(); } if (cb) cb(res, err); });
     }
     // `_reverse` records the direction the daemon's `initial_index` was
     // chosen for, so a cached snapshot is only trusted for that direction.
@@ -369,12 +378,31 @@ Singleton {
 
     // Refresh after compositor changes, debounced.
     Timer { id: refreshDebounce; interval: 80; onTriggered: { root.refreshAll(); if (root.keepSwitcherWarm) root.refreshSwitcher(false); } }
+    // Grids currently up. The grid snapshot runs to megabytes with hundreds
+    // of rolls; compositor events refetch it only while someone looks at it.
+    // Slot changes from the daemon still refresh it for the bar.
+    property int gridViewers: 0
+    Timer {
+        id: compositorDebounce; interval: 80
+        onTriggered: {
+            root.refreshStatus();
+            if (root.gridViewers > 0) root.refreshGrid();
+            if (root.keepSwitcherWarm) root.refreshSwitcher(false);
+        }
+    }
+    // `activewindow` also fires on every title change of the focused window;
+    // terminals and agents retitle constantly, so only a new address counts.
+    property string _activeAddress: ""
     Connections {
         target: Hyprland
         function onRawEvent(ev) {
             const n = ev.name;
-            if (n === "workspace" || n === "workspacev2" || n === "openwindow" || n === "closewindow" || n === "activewindow" || n === "movewindow" || n === "movewindowv2" || n === "focusedmon" || n === "createworkspace" || n === "destroyworkspace")
-                refreshDebounce.restart();
+            if (n === "activewindowv2") {
+                if (ev.data === root._activeAddress) return;
+                root._activeAddress = ev.data;
+                compositorDebounce.restart();
+            } else if (n === "workspace" || n === "workspacev2" || n === "openwindow" || n === "closewindow" || n === "movewindow" || n === "movewindowv2" || n === "focusedmon" || n === "createworkspace" || n === "destroyworkspace")
+                compositorDebounce.restart();
         }
     }
 }
