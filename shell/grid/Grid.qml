@@ -640,8 +640,8 @@ PanelWindow {
                 width: parent.width; height: win.fadeH
                 anchors.top: parent.top
                 gradient: Gradient {
-                    GradientStop { position: 0; color: Theme.oDarkroom }
-                    GradientStop { position: 1; color: Qt.rgba(Theme.oDarkroom.r, Theme.oDarkroom.g, Theme.oDarkroom.b, 0) }
+                    GradientStop { position: 0; color: Theme.oScrim }
+                    GradientStop { position: 1; color: Qt.rgba(Theme.oScrim.r, Theme.oScrim.g, Theme.oScrim.b, 0) }
                 }
                 opacity: win.canScrollUp ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
@@ -650,8 +650,8 @@ PanelWindow {
                 width: parent.width; height: win.fadeH
                 anchors.bottom: parent.bottom
                 gradient: Gradient {
-                    GradientStop { position: 0; color: Qt.rgba(Theme.oDarkroom.r, Theme.oDarkroom.g, Theme.oDarkroom.b, 0) }
-                    GradientStop { position: 1; color: Theme.oDarkroom }
+                    GradientStop { position: 0; color: Qt.rgba(Theme.oScrim.r, Theme.oScrim.g, Theme.oScrim.b, 0) }
+                    GradientStop { position: 1; color: Theme.oScrim }
                 }
                 opacity: win.canScrollDown ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }

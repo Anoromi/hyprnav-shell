@@ -24,7 +24,9 @@ Singleton {
     // org.freedesktop.appearance color-scheme (1 = dark; 0 and 2 = light),
     // the same setting theme-apply writes. Without a portal it stays dark.
     property bool light: false
-    readonly property color oScrim: light ? Qt.rgba(0.937, 0.918, 0.886, 0.9) : scrim
+    // A tint over the blurred desktop (Hyprland blurs the overlay layers;
+    // see the hyprnav-shell-glass layer rule), not an opaque sheet.
+    readonly property color oScrim: light ? Qt.rgba(0.965, 0.953, 0.933, 0.45) : Qt.rgba(0.102, 0.098, 0.090, 0.6)
     readonly property color oDarkroom: light ? "#EFEAE2" : darkroom
     readonly property color oSheet: light ? "#FBF9F5" : sheet
     readonly property color oEmulsion: light ? "#E4DDD2" : emulsion
