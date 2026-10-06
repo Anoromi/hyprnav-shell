@@ -197,20 +197,57 @@ PanelWindow {
     }
 
     // Geometry
-    readonly property int inset: 160
+    // Cards wrap into rows instead of shrinking to fit one line: a dozen
+    // recent workspaces made them under 100 px wide and unreadable. Rows past
+    // the screen scroll so the selected card stays in view.
+    readonly property int inset: Math.min(160, Math.round(width * 0.08))
     readonly property int gap: Theme.s24
+    readonly property int minCard: 260
     readonly property int maxCard: 300
-    readonly property int cardW: items.length === 0 ? maxCard : Math.min(maxCard, Math.floor((width - inset * 2 - gap * (items.length - 1)) / items.length))
+    readonly property int labelH: 34
+    readonly property int titleH: 40 + Theme.s32
+    readonly property int availW: Math.max(minCard, width - inset * 2)
+    readonly property int cols: Math.max(1, Math.min(items.length, Math.floor((availW + gap) / (minCard + gap))))
+    readonly property int cardW: Math.min(maxCard, Math.floor((availW - gap * (cols - 1)) / cols))
     readonly property int cardH: Math.round(cardW * 10 / 16)
-    readonly property int rowY: Math.round((height - cardH) / 2) - 30
+    readonly property int lineH: cardH + labelH + gap
+    readonly property int rowCount: Math.max(1, Math.ceil(items.length / cols))
+    readonly property int visibleRows: Math.max(1, Math.min(rowCount, Math.floor((height - 2 * Theme.s32 - titleH + gap) / lineH)))
+    readonly property int blockW: cols * cardW + (cols - 1) * gap
+    readonly property int blockH: visibleRows * lineH - gap
+    readonly property int left: Math.round((width - blockW) / 2)
+    readonly property int top: Math.max(Theme.s32, Math.round((height - blockH - titleH) / 2))
+    // First row on screen; moves only when the selection leaves the view.
+    property int firstRow: 0
+    readonly property int selRow: Math.floor(selected / cols)
+    onSelRowChanged: keepInView()
+    onVisibleRowsChanged: keepInView()
+    function keepInView() {
+        if (selRow < firstRow) firstRow = selRow;
+        else if (selRow >= firstRow + visibleRows) firstRow = selRow - visibleRows + 1;
+        firstRow = Math.max(0, Math.min(firstRow, rowCount - visibleRows));
+    }
+    function cardX(i) { return left + (i % cols) * (cardW + gap); }
+    function cardY(i) { return top + (Math.floor(i / cols) - firstRow) * lineH; }
+    function onScreen(i) { const r = Math.floor(i / cols); return r >= firstRow && r < firstRow + visibleRows; }
+    // Up and Down move a row, wrapping to the other end like Tab does.
+    function stepRow(dir) {
+        if (items.length === 0) return;
+        let next = selected + dir * cols;
+        if (next < 0 || next >= items.length) next = dir > 0 ? selected % cols : Math.min(items.length - 1, (rowCount - 1) * cols + selected % cols);
+        selected = next;
+        userMoved = true; heldKey = key(items[selected]);
+    }
 
     Item {
         id: keys
         anchors.fill: parent
         focus: true
         Keys.onPressed: ev => {
-            if (ev.key === Qt.Key_Tab || ev.key === Qt.Key_Right || ev.key === Qt.Key_Down) { win.step(1); ev.accepted = true; }
-            else if (ev.key === Qt.Key_Backtab || ev.key === Qt.Key_Left || ev.key === Qt.Key_Up) { win.step(-1); ev.accepted = true; }
+            if (ev.key === Qt.Key_Tab || ev.key === Qt.Key_Right) { win.step(1); ev.accepted = true; }
+            else if (ev.key === Qt.Key_Backtab || ev.key === Qt.Key_Left) { win.step(-1); ev.accepted = true; }
+            else if (ev.key === Qt.Key_Down) { win.stepRow(1); ev.accepted = true; }
+            else if (ev.key === Qt.Key_Up) { win.stepRow(-1); ev.accepted = true; }
             else if (ev.key === Qt.Key_Return || ev.key === Qt.Key_Enter || ev.key === Qt.Key_Space) { win.activate(); ev.accepted = true; }
             else if (ev.key === Qt.Key_Escape) { win.cancel(); ev.accepted = true; }
             else if (ev.key >= Qt.Key_1 && ev.key <= Qt.Key_9) {
@@ -245,10 +282,11 @@ PanelWindow {
                 required property int index
                 readonly property bool isSelected: index === win.selected
                 readonly property var cell: win.cellFor(modelData)
-                x: win.inset + index * (win.cardW + win.gap)
-                y: win.rowY
+                visible: win.onScreen(index)
+                x: win.cardX(index)
+                y: win.cardY(index)
                 width: win.cardW
-                height: win.cardH + 34
+                height: win.cardH + win.labelH
 
                 Rectangle {
                     id: frame
@@ -261,7 +299,7 @@ PanelWindow {
                         anchors.fill: parent; anchors.margins: 3
                         workspaceId: card.modelData.workspace_id
                         fallbackClass: card.modelData.app_class
-                        live: win.capturing
+                        live: win.capturing && card.visible
                     }
                     Glyph {
                         anchors.right: parent.right; anchors.top: parent.top
@@ -310,8 +348,8 @@ PanelWindow {
             id: ring
             visible: win.items.length > 0
             readonly property int pad: 7
-            x: win.inset + win.selected * (win.cardW + win.gap) - pad
-            y: win.rowY - pad
+            x: win.cardX(win.selected) - pad
+            y: win.cardY(win.selected) - pad
             width: win.cardW + pad * 2
             height: win.cardH + pad * 2
             radius: Theme.rFrame + pad
@@ -320,13 +358,14 @@ PanelWindow {
             border.width: Theme.ringWidth
             // No slide while hidden, so an open never shows the ring travelling.
             Behavior on x { enabled: win.open && content.opacity === 1; NumberAnimation { duration: Theme.tSnap; easing.type: Easing.OutCubic } }
+            Behavior on y { enabled: win.open && content.opacity === 1; NumberAnimation { duration: Theme.tSnap; easing.type: Easing.OutCubic } }
         }
 
         // Environment title of the selected frame
         Item {
-            x: win.inset
-            y: win.rowY + win.cardH + 34 + Theme.s32
-            width: win.width - win.inset * 2
+            x: win.left
+            y: win.top + win.blockH + Theme.s32
+            width: win.blockW
             height: 40
             Text {
                 id: envTitle
