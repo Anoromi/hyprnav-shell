@@ -27,6 +27,9 @@ Singleton {
     // A tint over the blurred desktop (Hyprland blurs the overlay layers;
     // see the hyprnav-shell-glass layer rule), not an opaque sheet.
     readonly property color oScrim: light ? Qt.rgba(0.965, 0.953, 0.933, 0.18) : Qt.rgba(0.102, 0.098, 0.090, 0.35)
+    // Soft outline for text that sits straight on the glass, so it stays
+    // legible over whatever is behind it without thickening the tint.
+    readonly property color oHalo: light ? Qt.rgba(0.976, 0.969, 0.957, 0.75) : Qt.rgba(0.102, 0.098, 0.090, 0.75)
     readonly property color oDarkroom: light ? "#EFEAE2" : darkroom
     readonly property color oSheet: light ? "#FBF9F5" : sheet
     readonly property color oEmulsion: light ? "#E4DDD2" : emulsion

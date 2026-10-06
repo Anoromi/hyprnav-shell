@@ -412,6 +412,7 @@ PanelWindow {
                                     height: win.titleH
                                     width: parent.width
                                     Text {
+                                        style: Text.Outline; styleColor: Theme.oHalo
                                         id: rowTitle
                                         width: Math.min(implicitWidth, header.width * 0.6)
                                         elide: Text.ElideRight
@@ -420,6 +421,7 @@ PanelWindow {
                                         font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
                                     }
                                     Text {
+                                        style: Text.Outline; styleColor: Theme.oHalo
                                         visible: rowItem.modelData.breadcrumb.length > 0
                                         anchors.baseline: rowTitle.baseline
                                         width: Math.min(implicitWidth, header.width - rowTitle.width - 60)
@@ -586,6 +588,7 @@ PanelWindow {
                                             spacing: Theme.s8
                                             readonly property bool shared: (cellItem.cell.shared ?? cellItem.cell.inherited) === true
                                             Text {
+                                                style: Text.Outline; styleColor: Theme.oHalo
                                                 width: win.cellW - (cellItem.cell.active ? 50 : 0) - (parent.shared ? sharedTag.implicitWidth + Theme.s8 : 0)
                                                 text: cellItem.agent ? ("agent: " + cellItem.agent.client) : cellItem.cell.unnumbered ? ("temporary" + (cellItem.cell.owner ? ", by " + cellItem.cell.owner : "")) : cellItem.cell.slot_display_name
                                                 elide: Text.ElideRight
@@ -595,6 +598,7 @@ PanelWindow {
                                             }
                                             // The same workspace every roll under this ancestor shows.
                                             Text {
+                                                style: Text.Outline; styleColor: Theme.oHalo
                                                 id: sharedTag
                                                 visible: parent.shared
                                                 text: "shared"
@@ -603,6 +607,7 @@ PanelWindow {
                                                 font.family: Theme.sans; font.pixelSize: Theme.fs12
                                             }
                                             Text {
+                                                style: Text.Outline; styleColor: Theme.oHalo
                                                 visible: cellItem.cell.active
                                                 text: "here"
                                                 color: Theme.oPencil
@@ -781,6 +786,7 @@ PanelWindow {
 
     // Key hints, bottom left
     Text {
+        style: Text.Outline; styleColor: Theme.oHalo
         x: win.inset
         y: win.height - 60
         text: "Enter opens the frame.  Ctrl+P for actions.  Esc closes.  󰐃 marks a stuck tree."

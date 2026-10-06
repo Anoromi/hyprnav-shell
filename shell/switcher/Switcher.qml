@@ -326,12 +326,14 @@ PanelWindow {
                     anchors.left: frame.left
                     spacing: Theme.s8
                     Text {
+                        style: Text.Outline; styleColor: Theme.oHalo
                         text: card.cell ? (card.cell.unnumbered ? "" : card.cell.slot_index) : (card.index + 1)
                         visible: text !== ""
                         color: card.isSelected ? Theme.oPencil : Theme.oFixer
                         font.family: Theme.mono; font.pixelSize: Theme.fs15; font.weight: Font.Medium
                     }
                     Text {
+                        style: Text.Outline; styleColor: Theme.oHalo
                         width: win.cardW - 24
                         text: card.cell ? card.cell.slot_display_name : card.modelData.workspace_name
                         elide: Text.ElideRight
@@ -368,12 +370,14 @@ PanelWindow {
             width: win.blockW
             height: 40
             Text {
+                style: Text.Outline; styleColor: Theme.oHalo
                 id: envTitle
                 text: win.selectedCell ? win.selectedCell.environment_title : (win.items[win.selected] ? win.items[win.selected].workspace_name : "")
                 color: Theme.oPaper
                 font.family: Theme.casual; font.pixelSize: Theme.fs22; font.weight: Font.Medium
             }
             Text {
+                style: Text.Outline; styleColor: Theme.oHalo
                 anchors.left: envTitle.right; anchors.leftMargin: Theme.s16
                 anchors.baseline: envTitle.baseline
                 visible: win.selectedCell && win.selectedCell.environment_locked
