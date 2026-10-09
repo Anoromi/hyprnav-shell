@@ -107,9 +107,10 @@ PanelWindow {
             required property var modelData
             readonly property var c: modelData.client
             readonly property var a: modelData.agent
-            // Client coordinates are global; subtract this monitor's origin and scale.
-            x: (c.at[0] - (win.monitor ? win.monitor.x : 0)) / (win.monitor ? win.monitor.scale : 1) + c.size[0] / (win.monitor ? win.monitor.scale : 1) - width - 10
-            y: (c.at[1] - (win.monitor ? win.monitor.y : 0)) / (win.monitor ? win.monitor.scale : 1) + 10
+            // Hyprland reports client and monitor positions in the global
+            // layout space, already scaled; only the monitor origin differs.
+            x: c.at[0] - (win.monitor ? win.monitor.x : 0) + c.size[0] - width - 10
+            y: c.at[1] - (win.monitor ? win.monitor.y : 0) + 10
             width: tag.implicitWidth + 24
             height: 30
             Rectangle {
@@ -147,11 +148,10 @@ PanelWindow {
         delegate: Rectangle {
             required property var modelData
             readonly property var c: modelData.client
-            readonly property real sc: win.monitor ? win.monitor.scale : 1
-            x: (c.at[0] - (win.monitor ? win.monitor.x : 0)) / sc - 2
-            y: (c.at[1] - (win.monitor ? win.monitor.y : 0)) / sc - 2
-            width: c.size[0] / sc + 4
-            height: c.size[1] / sc + 4
+            x: c.at[0] - (win.monitor ? win.monitor.x : 0) - 2
+            y: c.at[1] - (win.monitor ? win.monitor.y : 0) - 2
+            width: c.size[0] + 4
+            height: c.size[1] + 4
             color: "transparent"
             radius: 6
             border.color: Theme.pencil
