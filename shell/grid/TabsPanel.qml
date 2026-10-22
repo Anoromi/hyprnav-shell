@@ -3,9 +3,11 @@ import QtQuick
 import QtQuick.Effects
 import ".."
 
-// The grid's browser-tab column: Essentials as tiles, "New tab", each group's
-// tabs, then the other tabs. Every entry wears a jump hint; the grid owns the
-// keys and tells this column the typed prefix and the selection.
+// The grid's browser-tab column: Essentials as tiles with a "New tab" tile
+// after them, the Pinned rows, each group as one header row (its members
+// under it once expanded), then the other tabs. Every entry wears a jump
+// hint; the grid owns the keys and tells this column the typed prefix and
+// the selection. The search field shows only while searching.
 //
 // It is one opaque sheet with its own key hints, so it reads the same on the
 // glass beside the rolls and over the browser while previewing, where nothing
@@ -126,9 +128,14 @@ Item {
         property bool here: false
         property bool audible: false
         property string badge: ""
-        property bool muted: false       // "New tab": quieter than a tab
+        property bool closed: false      // a pinned tab or member with no tab: dimmed
+        property bool strong: false      // a group header
+        property int indent: 0
+        property int iconW: 16
+        property string trailText: ""
         property string title: ""
         property alias iconItem: iconSlot.data
+        property alias trailItem: trailExtra.data
         width: column.width; height: panel.rowH
         opacity: panel.ruledOut(hint) ? 0.3 : 1
         Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
@@ -141,10 +148,10 @@ Item {
         Row {
             id: lead
             anchors.verticalCenter: parent.verticalCenter
-            x: panel.textX - 2
+            x: panel.textX - 2 + entry.indent
             spacing: 6
             Hint { anchors.verticalCenter: parent.verticalCenter; hint: entry.hint; selected: entry.selected }
-            Item { id: iconSlot; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16 }
+            Item { id: iconSlot; anchors.verticalCenter: parent.verticalCenter; width: entry.iconW; height: 16; opacity: entry.closed ? 0.45 : 1 }
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
@@ -152,9 +159,9 @@ Item {
             width: trail.x - x - 6
             elide: Text.ElideRight
             text: entry.title
-            color: entry.muted && !entry.selected ? Theme.oFixer : Theme.oPaper
+            color: entry.closed && !entry.selected ? Theme.oFixer : Theme.oPaper
             font.family: Theme.sans; font.pixelSize: Theme.fs13
-            font.weight: entry.selected || entry.here ? Font.Medium : Font.Normal
+            font.weight: entry.selected || entry.here || entry.strong ? Font.Medium : Font.Normal
         }
         Row {
             id: trail
@@ -181,31 +188,81 @@ Item {
                 color: Theme.oPencil
                 font.family: Theme.sans; font.pixelSize: Theme.fs12; font.weight: Font.Medium
             }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: entry.trailText !== ""
+                text: entry.trailText
+                color: Theme.oFixer
+                font.family: Theme.mono; font.pixelSize: Theme.fs12
+            }
+            Item { id: trailExtra; anchors.verticalCenter: parent.verticalCenter; width: childrenRect.width; height: 16 }
         }
         Ring { on: entry.selected }
     }
 
-    // The "New tab" entry: "New tab", or the query to open. Shown in one
-    // place at a time.
-    component NewTabRow: EntryRow {
-        id: newRow
-        property bool shown: true
-        readonly property var item: panel.model.newTab
-        selected: shown && item !== null && item !== undefined && item.index === panel.selIndex
-        visible: shown && item !== null && item !== undefined
-        onVisibleChanged: if (visible) panel._entries["new"] = newRow
-        Component.onCompleted: if (visible) panel._entries["new"] = newRow
-        hint: item ? item.hint : ""
-        title: item ? item.title : ""
-        muted: true
-        iconItem: Glyph { anchors.centerIn: parent; text: "󰐕"; size: 16; color: newRow.selected ? Theme.oPencil : Theme.oFixer }
+    // A tab, pinned tab or group member.
+    component TabRow: EntryRow {
+        id: tabRow
+        required property var modelData
+        selected: modelData.index === panel.selIndex
+        hint: modelData.hint
+        here: modelData.here === true
+        audible: modelData.audible === true
+        badge: modelData.badge || ""
+        title: modelData.title
+        closed: modelData.open === false
+        Component.onCompleted: panel._entries[modelData.key] = tabRow
+        iconItem: Favicon {
+            anchors.centerIn: parent
+            icon: tabRow.modelData.icon || ""
+            fallback: tabRow.modelData.host || tabRow.modelData.title
+        }
         MouseArea {
             anchors.fill: parent
             enabled: panel.live
             hoverEnabled: true
             onPositionChanged: mouse => panel.pointerMoved(parent, mouse.x, mouse.y)
-            onEntered: if (panel.hoverArmed && newRow.item) panel.hovered(newRow.item.index)
-            onClicked: if (newRow.item) panel.picked(newRow.item)
+            onEntered: if (panel.hoverArmed) panel.hovered(tabRow.modelData.index)
+            onClicked: panel.picked(tabRow.modelData)
+        }
+    }
+
+    // A group's header: its first icons stacked, its name, how many of its
+    // tabs are open of how many, and which way it folds.
+    component GroupRow: EntryRow {
+        id: groupRow
+        required property var modelData
+        selected: modelData.index === panel.selIndex
+        hint: modelData.hint
+        here: modelData.here === true
+        strong: true
+        title: modelData.title
+        iconW: 22
+        trailText: modelData.openCount + "/" + modelData.count
+        Component.onCompleted: panel._entries[modelData.key] = groupRow
+        iconItem: Repeater {
+            model: groupRow.modelData.icons
+            delegate: Favicon {
+                required property var modelData
+                required property int index
+                size: 12
+                x: index * 5; y: 2; z: -index
+                icon: modelData.icon || ""
+                fallback: modelData.fallback || ""
+            }
+        }
+        trailItem: Glyph {
+            text: groupRow.modelData.expanded ? "󰅀" : "󰅂"
+            size: 14
+            color: groupRow.selected ? Theme.oPencil : Theme.oFixer
+        }
+        MouseArea {
+            anchors.fill: parent
+            enabled: panel.live
+            hoverEnabled: true
+            onPositionChanged: mouse => panel.pointerMoved(parent, mouse.x, mouse.y)
+            onEntered: if (panel.hoverArmed) panel.hovered(groupRow.modelData.index)
+            onClicked: panel.picked(groupRow.modelData)
         }
     }
 
@@ -228,33 +285,33 @@ Item {
         }
     }
 
-    // The search field; it is always there, so "/" changes what it says and
-    // not where everything sits.
+    // The search field, only while searching ("/").
     Item {
         id: header
         x: panel.pad; y: panel.pad
         width: parent.width - panel.pad * 2
-        height: panel.rowH
+        height: panel.searching ? panel.rowH : 0
+        visible: panel.searching
         Rectangle {
             width: parent.width; height: panel.rowH
             radius: Theme.rSheet
             color: Theme.oDarkroom
-            border.width: panel.searching ? 2 : 1
-            border.color: panel.searching ? Theme.oPencil : panel.line
+            border.width: 2
+            border.color: Theme.oPencil
             Glyph {
                 id: searchGlyph
                 anchors.verticalCenter: parent.verticalCenter
                 x: panel.textX
                 text: "󰍉"; size: 14
-                color: panel.searching ? Theme.oPencil : Theme.oFixer
+                color: Theme.oPencil
             }
             Text {
                 id: queryText
                 anchors.verticalCenter: parent.verticalCenter
                 x: searchGlyph.x + searchGlyph.width + Theme.s4 + 2
-                width: Math.min(implicitWidth, slashKey.x - x - Theme.s8)
+                width: Math.min(implicitWidth, parent.width - x - Theme.s8)
                 elide: Text.ElideLeft
-                text: panel.query !== "" ? panel.query : "Search"
+                text: panel.query !== "" ? panel.query : "Search tabs"
                 color: panel.query !== "" ? Theme.oPaper : Theme.oFixer
                 font.family: Theme.sans; font.pixelSize: Theme.fs13
             }
@@ -269,27 +326,12 @@ Item {
                     NumberAnimation { to: 0; duration: 500 } NumberAnimation { to: 1; duration: 500 }
                 }
             }
-            // The key that starts a search, while not searching.
-            Rectangle {
-                id: slashKey
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.right: parent.right; anchors.rightMargin: panel.textX
-                visible: !panel.searching
-                width: 18; height: 18; radius: 3
-                color: Theme.oEmulsion
-                Text {
-                    anchors.centerIn: parent
-                    text: "/"
-                    color: Theme.oPaper
-                    font.family: Theme.mono; font.pixelSize: Theme.fs13; font.weight: Font.Medium
-                }
-            }
         }
     }
 
     Flickable {
         id: flick
-        anchors.top: header.bottom; anchors.topMargin: Theme.s4
+        anchors.top: header.bottom; anchors.topMargin: panel.searching ? Theme.s4 : 0
         anchors.bottom: footer.top
         width: parent.width
         contentWidth: width
@@ -308,12 +350,11 @@ Item {
             topPadding: Theme.s8
             bottomPadding: Theme.s8
 
-            // Essentials: icons in a row that wraps; the selected one's name
-            // shows under the row.
+            // Essentials: icons in a row that wraps, and the "New tab" tile
+            // after them; the selected one's name shows under the row.
             Column {
                 width: parent.width
                 spacing: Theme.s8
-                visible: panel.model.essentials.length > 0
                 Flow {
                     width: parent.width
                     spacing: panel.tileGap
@@ -363,10 +404,44 @@ Item {
                             }
                         }
                     }
+                    // New tab: in a search it opens what is typed.
+                    Item {
+                        id: newTile
+                        readonly property var item: panel.model.newTab ?? null
+                        readonly property bool selected: item !== null && item.index === panel.selIndex
+                        visible: item !== null
+                        width: panel.tileSize; height: panel.tileSize
+                        opacity: item && panel.ruledOut(item.hint) ? 0.3 : 1
+                        Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
+                        onVisibleChanged: if (visible) panel._entries["new"] = newTile
+                        Component.onCompleted: panel._entries["new"] = newTile
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Theme.rSheet
+                            color: "transparent"
+                            border.width: 1
+                            border.color: Qt.rgba(Theme.oPaper.r, Theme.oPaper.g, Theme.oPaper.b, 0.18)
+                            Glyph {
+                                anchors.centerIn: parent
+                                text: "󰐕"; size: 18
+                                color: newTile.selected ? Theme.oPencil : Theme.oFixer
+                            }
+                        }
+                        Hint { x: -6; y: -6; hint: newTile.item ? newTile.item.hint : ""; selected: newTile.selected }
+                        Ring { on: newTile.selected; out: 3 }
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: panel.live
+                            hoverEnabled: true
+                            onPositionChanged: mouse => panel.pointerMoved(parent, mouse.x, mouse.y)
+                            onEntered: if (panel.hoverArmed && newTile.item) panel.hovered(newTile.item.index)
+                            onClicked: if (newTile.item) panel.picked(newTile.item)
+                        }
+                    }
                 }
                 Text {
                     readonly property var sel: panel.model.selectables[panel.selIndex] ?? null
-                    visible: sel !== null && sel.kind === "essential"
+                    visible: sel !== null && (sel.kind === "essential" || sel.kind === "new")
                     width: parent.width
                     leftPadding: panel.textX
                     elide: Text.ElideRight
@@ -376,10 +451,7 @@ Item {
                 }
             }
 
-            // New tab; while searching it moves below the matches.
-            NewTabRow { shown: !panel.searching }
-
-            // Groups, then the rest
+            // Pinned, the groups, then the rest.
             Repeater {
                 model: panel.model.sections
                 delegate: Column {
@@ -388,6 +460,7 @@ Item {
                     width: column.width
                     spacing: 2
                     Text {
+                        visible: section.modelData.title !== ""
                         leftPadding: panel.textX
                         bottomPadding: 2
                         width: column.width
@@ -398,35 +471,24 @@ Item {
                     }
                     Repeater {
                         model: section.modelData.items
-                        delegate: EntryRow {
-                            id: tabRow
+                        delegate: TabRow {}
+                    }
+                    Repeater {
+                        model: section.modelData.groups
+                        delegate: Column {
+                            id: group
                             required property var modelData
-                            selected: modelData.index === panel.selIndex
-                            hint: modelData.hint
-                            here: modelData.here === true
-                            audible: modelData.audible === true
-                            badge: modelData.badge || ""
-                            title: modelData.title
-                            Component.onCompleted: panel._entries[modelData.key] = tabRow
-                            iconItem: Favicon {
-                                anchors.centerIn: parent
-                                icon: tabRow.modelData.icon || ""
-                                fallback: tabRow.modelData.host || tabRow.modelData.title
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                enabled: panel.live
-                                hoverEnabled: true
-                                onPositionChanged: mouse => panel.pointerMoved(parent, mouse.x, mouse.y)
-                                onEntered: if (panel.hoverArmed) panel.hovered(tabRow.modelData.index)
-                                onClicked: panel.picked(tabRow.modelData)
+                            width: column.width
+                            spacing: 2
+                            GroupRow { modelData: group.modelData.header }
+                            Repeater {
+                                model: group.modelData.items
+                                delegate: TabRow { indent: 12 }
                             }
                         }
                     }
                 }
             }
-
-            NewTabRow { shown: panel.searching }
         }
     }
 

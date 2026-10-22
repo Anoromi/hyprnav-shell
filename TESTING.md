@@ -756,3 +756,27 @@ A global dispatched from a Lua bind's callback follows that bind: from the
 Ctrl+Tab bind the shell sees a press and then a release, from the Ctrl
 release bind only a release (checked with temporary logging). So
 `tabs-next`/`tabs-prev` act on the press and `tabs-commit` on either.
+
+## Pinned tabs and collapsible groups (2026-10-22)
+
+Pinned rows and group members are saved entries like Essentials
+(`tabs/model.js`): closing their tab leaves them dimmed, opening one opens
+its home page and claims the new tab. Groups show as one header row; the
+search field shows only while searching; "New tab" is one tile after the
+Essentials. Hints run right hand first (`htnsdueoai`).
+
+Lab (`scripts/lab.py up`), one `scripts/fake-browser-tabs.py --pid 4242`,
+a state file with old-format groups (members `{ browser, url, tabKey }`).
+
+| Case | Result |
+|---|---|
+| Old groups load | members migrate to entries, take their tabs by URL and the tabs' titles and icons |
+| Column opens | Pinned rows, then each group one header row (stacked icons, open/total, chevron), selection on the header holding the tab showing |
+| Group hint `d` | expands in place, members `dh dt dn`, the rest fades; `t` opens `dt` |
+| `dd`, Esc, Backspace, Enter | `dd` collapses, Esc while `d` is typed collapses, Backspace on a member collapses, Enter toggles; j moves onto members |
+| Member's tab closed alone (host `close`) | stays in the group, dimmed, count 1/3 |
+| Closed member's hint | `create {url}`, the new tab is claimed, not loose |
+| `/` then `rust` | search field appears, the Docs group expands with its match selected (not the header); `zzz` leaves only the New tab tile, "Open “zzz” in a new tab" |
+| Palette | loose tab: Pin tab moves it to Pinned; member: Remove from group, Close its tab (stays in the group); header: Collapse, Rename, Delete |
+| Browser restart (new source id) | open entries relink by URL; a member closed alone does not take the reopened tab |
+| Ctrl+Tab (`ipc call tabs next`) | unchanged, open tabs only |

@@ -1,24 +1,26 @@
 .pragma library
 
 // Browser tabs from every connected browser, merged, plus the shell's own
-// Essentials and groups over them. Plain functions so node can test them.
+// Essentials, pinned tabs and groups over them. Plain functions so node can
+// test them.
 //
 // A source is one running browser's host (see services/BrowserTabs.qml):
 // { id: "zen-4242", browser: "zen", browserPid, snapshot }. Its tab and
 // window ids are only unique inside it, so merged ones are "<source>/<id>"
 // strings and keep the browser's own as `rawId`.
 //
-// The model: { essentials: [{ id, title, url, icon, browser, tabKey, tabUrl }],
-//              groups: [{ id, name, members: [{ browser, url, tabKey }] }],
+// The model: { essentials: [entry], pinned: [entry],
+//              groups: [{ id, name, members: [entry] }],
 //              nextId, legacyImported }
-// Tab keys die with the browser; URLs survive, so members and essentials
-// find their tab again by browser and URL after a restart.
+// entry:     { id, title, url, icon, browser, tabKey, tabUrl }
 //
-// An essential is the shell's, Arc style: its home `url`, title and icon
-// stay until it is unpinned, whether or not a tab shows it. `tabKey` is the
-// tab it opened (null: none open), `tabUrl` where that tab was last, for
-// finding it again after a restart. It only takes a tab it opened itself or
-// had before the restart; other tabs on its site stay loose tabs.
+// Every entry is the shell's, Arc style: its home `url`, title and icon stay
+// until it is removed (unpinned, or taken out of its group), whether or not
+// a tab shows it. `tabKey` is the tab it opened (null: none open), `tabUrl`
+// where that tab was last, for finding it again after a restart: tab keys
+// die with the browser, URLs survive. An entry only takes a tab it opened
+// itself or had before the restart; other tabs on its site stay loose tabs.
+// Essentials show as icons, pinned tabs and group members as rows.
 
 // Hyprland classes per browser, for when its window's pid is not the one
 // that started the host.
@@ -29,38 +31,62 @@ var CLASSES = {
 };
 
 function emptyModel() {
-    return { essentials: [], groups: [], nextId: 1, legacyImported: false };
+    return { essentials: [], pinned: [], groups: [], nextId: 1, legacyImported: false };
 }
 
 function str(value) { return typeof value === "string" ? value : ""; }
+
+function newId(model, prefix) {
+    var id = prefix + model.nextId;
+    model.nextId += 1;
+    return id;
+}
+
+function entryOf(model, e, prefix) {
+    return { id: e.id !== undefined && e.id !== null ? String(e.id) : newId(model, prefix),
+             title: String(e.title || e.url), url: e.url, icon: str(e.icon), browser: str(e.browser),
+             tabKey: typeof e.tabKey === "string" ? e.tabKey : null, tabUrl: str(e.tabUrl) };
+}
+
+function hasUrl(e) { return e && typeof e.url === "string"; }
 
 function normalize(stored) {
     var model = emptyModel();
     if (!stored || typeof stored !== "object") return model;
     model.nextId = typeof stored.nextId === "number" && stored.nextId > 0 ? stored.nextId : 1;
     model.legacyImported = stored.legacyImported === true;
-    model.essentials = (Array.isArray(stored.essentials) ? stored.essentials : [])
-        .filter(function (e) { return e && typeof e.url === "string"; })
-        .map(function (e) {
-            return { id: String(e.id), title: String(e.title || e.url), url: e.url, icon: str(e.icon),
-                     browser: str(e.browser), tabKey: typeof e.tabKey === "string" ? e.tabKey : null,
-                     tabUrl: str(e.tabUrl) };
-        });
+    function list(x) { return (Array.isArray(x) ? x : []).filter(hasUrl); }
+    model.essentials = list(stored.essentials).map(function (e) { return entryOf(model, e, "e"); });
+    model.pinned = list(stored.pinned).map(function (e) { return entryOf(model, e, "p"); });
     model.groups = (Array.isArray(stored.groups) ? stored.groups : [])
         .filter(function (g) { return g && typeof g.name === "string"; })
         .map(function (g) {
             return { id: String(g.id), name: g.name,
-                     members: (Array.isArray(g.members) ? g.members : [])
-                         .filter(function (m) { return m && typeof m.url === "string"; })
-                         .map(function (m) { return { browser: str(m.browser), url: m.url, tabKey: typeof m.tabKey === "string" ? m.tabKey : null }; }) };
-        });
+                     members: list(g.members).map(function (m) {
+                         if (m.id !== undefined) return entryOf(model, m, "m");
+                         // A member from before groups kept their tabs: just
+                         // { browser, url, tabKey }. One with no tab waited
+                         // for a tab on its URL; it still finds one.
+                         return entryOf(model, { title: m.url, url: m.url, browser: m.browser,
+                                                 tabKey: typeof m.tabKey === "string" ? m.tabKey : "legacy",
+                                                 tabUrl: m.url }, "m");
+                     }) };
+        })
+        .filter(function (g) { return g.members.length > 0; });
     return model;
 }
 
-function newId(model, prefix) {
-    var id = prefix + model.nextId;
-    model.nextId += 1;
-    return id;
+// Every entry, in the order they claim tabs.
+function entries(model) {
+    var all = model.essentials.concat(model.pinned);
+    model.groups.forEach(function (g) { all = all.concat(g.members); });
+    return all;
+}
+
+function findEntry(model, id) {
+    var all = entries(model);
+    for (var i = 0; i < all.length; i++) if (all[i].id === id) return all[i];
+    return null;
 }
 
 // The Island Productivity extension kept Essentials and groups itself; its
@@ -69,16 +95,19 @@ function newId(model, prefix) {
 function importLegacy(model, legacy, browser) {
     var old = legacy && typeof legacy === "object" ? legacy : {};
     (Array.isArray(old.essentials) ? old.essentials : []).forEach(function (e) {
-        if (!e || typeof e.url !== "string") return;
+        if (!hasUrl(e)) return;
         model.essentials.push({ id: newId(model, "e"), title: String(e.title || e.url), url: e.url,
                                 icon: str(e.icon), browser: browser, tabKey: "legacy", tabUrl: "" });
     });
     (Array.isArray(old.groups) ? old.groups : []).forEach(function (g) {
         if (!g || typeof g.name !== "string") return;
         var members = (Array.isArray(g.members) ? g.members : [])
-            .filter(function (m) { return m && typeof m.url === "string" && m.url !== ""; })
-            .map(function (m) { return { browser: browser, url: m.url, tabKey: null }; });
-        model.groups.push({ id: newId(model, "g"), name: g.name, members: members });
+            .filter(function (m) { return hasUrl(m) && m.url !== ""; })
+            .map(function (m) {
+                return { id: newId(model, "m"), title: m.url, url: m.url, icon: "", browser: browser,
+                         tabKey: "legacy", tabUrl: m.url };
+            });
+        if (members.length > 0) model.groups.push({ id: newId(model, "g"), name: g.name, members: members });
     });
     model.legacyImported = true;
 }
@@ -88,22 +117,19 @@ function pageOf(url) {
     return (url || "").replace(/[?#].*$/, "").replace(/\/+$/, "");
 }
 
-// Re-attach members whose tab is gone to an unclaimed tab with the same
-// browser and URL, and essentials whose tab went with its window or browser
-// to one on the page their tab was on, or on their home page. Live tabs
-// keep their essential however far they navigate; the essential notes where
-// the tab is and the site's icon, so it still shows with no tab. Returns
+// Re-attach entries whose tab went with its window or browser to one on the
+// page their tab was on, or on their home page. Live tabs keep their entry
+// however far they navigate; the entry notes where the tab is and the
+// site's icon, so it still shows with no tab, and a title it lacks. Returns
 // whether anything changed.
 function relink(model, tabs, icons) {
     var changed = false;
     var live = {}, claimed = {};
     var known = icons || {};
     for (var i = 0; i < tabs.length; i++) live[tabs[i].id] = tabs[i];
-    model.essentials.forEach(function (e) { if (e.tabKey !== null && live[e.tabKey]) claimed[e.tabKey] = true; });
-    model.groups.forEach(function (g) {
-        g.members.forEach(function (m) { if (m.tabKey !== null && live[m.tabKey]) claimed[m.tabKey] = true; });
-    });
-    model.essentials.forEach(function (e) {
+    var all = entries(model);
+    all.forEach(function (e) { if (e.tabKey !== null && live[e.tabKey]) claimed[e.tabKey] = true; });
+    all.forEach(function (e) {
         if (e.tabKey === null) return;
         var tab = live[e.tabKey] || null;
         for (var k = 0; !tab && k < tabs.length; k++) {
@@ -115,36 +141,23 @@ function relink(model, tabs, icons) {
         claimed[tab.id] = true;
         if (e.tabKey !== tab.id) { e.tabKey = tab.id; changed = true; }
         if (tab.url && e.tabUrl !== tab.url) { e.tabUrl = tab.url; changed = true; }
+        if ((!e.title || e.title === e.url) && tab.title && e.title !== tab.title) { e.title = tab.title; changed = true; }
         var icon = known[tab.icon];
         if (icon && /^(data:|https?:)/.test(icon) && e.icon !== icon) { e.icon = icon; changed = true; }
-    });
-    model.groups.forEach(function (g) {
-        g.members.forEach(function (m) {
-            if (m.tabKey !== null && live[m.tabKey]) return;
-            for (var k = 0; k < tabs.length; k++) {
-                var t = tabs[k];
-                if (!claimed[t.id] && t.browser === m.browser && t.url === m.url) {
-                    m.tabKey = t.id; claimed[t.id] = true; changed = true;
-                    return;
-                }
-            }
-        });
     });
     return changed;
 }
 
-// The tab an essential asked its browser for: the first new one in that
-// source. `opening`: { essential, source, known: { <tab key>: true } }, the
+// The tab an entry asked its browser for: the first new one in that
+// source. `opening`: { entry, source, known: { <tab key>: true } }, the
 // tabs the source had when asked. Returns whether it was found.
 function claimOpened(model, opening, tabs) {
-    var e = null;
-    model.essentials.forEach(function (x) { if (x.id === opening.essential) e = x; });
+    var e = findEntry(model, opening.entry);
     if (!e) return false;
     for (var i = 0; i < tabs.length; i++) {
         var t = tabs[i];
         if (t.source === opening.source && !opening.known[t.id]) {
-            model.essentials.forEach(function (x) { if (x.tabKey === t.id) x.tabKey = null; });
-            removeMember(model, t.id);
+            entries(model).forEach(function (x) { if (x.tabKey === t.id) x.tabKey = null; });
             e.tabKey = t.id;
             e.tabUrl = t.url;
             return true;
@@ -153,59 +166,101 @@ function claimOpened(model, opening, tabs) {
     return false;
 }
 
-function removeMember(model, tabKey) {
-    var changed = false;
-    model.groups.forEach(function (g) {
-        var kept = g.members.filter(function (m) { return m.tabKey !== tabKey; });
-        if (kept.length !== g.members.length) { g.members = kept; changed = true; }
-    });
-    return changed;
-}
-
-// Tabs closed one by one leave their group and their essential, which stays
-// pinned with no tab; tabs that went with their window, or with the whole
-// browser, stay and relink when they come back.
-// `before` and `after` are one source's own snapshots.
+// Tabs closed one by one leave their entry with no tab; tabs that went with
+// their window, or with the whole browser, stay and relink when they come
+// back. `before` and `after` are one source's own snapshots.
 function dropClosed(model, sourceId, before, after) {
     if (!before) return false;
     var live = {}, windows = {};
     (after.tabs || []).forEach(function (t) { live[t.id] = true; });
     (after.windows || []).forEach(function (w) { windows[w.id] = true; });
     var changed = false;
+    var all = entries(model);
     (before.tabs || []).forEach(function (t) {
         if (live[t.id] || !windows[t.windowId]) return;
         var key = sourceId + "/" + t.id;
-        if (removeMember(model, key)) changed = true;
-        model.essentials.forEach(function (e) { if (e.tabKey === key) { e.tabKey = null; changed = true; } });
+        all.forEach(function (e) { if (e.tabKey === key) { e.tabKey = null; changed = true; } });
     });
     return changed;
 }
 
+// Groups go with their last member.
+function prune(model) {
+    model.groups = model.groups.filter(function (g) { return g.members.length > 0; });
+}
+
+// Take an entry out of wherever it is. Returns it, or null.
+function removeEntry(model, id) {
+    var found = null;
+    function keep(e) { if (e.id === id) { found = e; return false; } return true; }
+    model.essentials = model.essentials.filter(keep);
+    model.pinned = model.pinned.filter(keep);
+    model.groups.forEach(function (g) { g.members = g.members.filter(keep); });
+    prune(model);
+    return found;
+}
+
+// A tab moving somewhere new leaves the pinned tab or group member it was,
+// and its essential, which stays with no tab.
+function take(model, tabKey) {
+    model.essentials.forEach(function (e) { if (e.tabKey === tabKey) e.tabKey = null; });
+    model.pinned = model.pinned.filter(function (e) { return e.tabKey !== tabKey; });
+    model.groups.forEach(function (g) { g.members = g.members.filter(function (e) { return e.tabKey !== tabKey; }); });
+    prune(model);
+}
+
+function entryFor(model, tab, prefix) {
+    return { id: newId(model, prefix), title: tab.title || tab.url || "", url: tab.url || "", icon: tab.icon || "",
+             browser: tab.browser, tabKey: tab.id, tabUrl: tab.url || "" };
+}
+
+// To Essentials.
 function pin(model, tab) {
     if (model.essentials.some(function (e) { return e.tabKey === tab.id; })) return;
-    removeMember(model, tab.id);
-    model.essentials.push({ id: newId(model, "e"), title: tab.title || tab.url, url: tab.url,
-                            icon: tab.icon || "", browser: tab.browser, tabKey: tab.id, tabUrl: tab.url });
+    take(model, tab.id);
+    model.essentials.push(entryFor(model, tab, "e"));
+}
+
+// To the Pinned rows.
+function pinTab(model, tab) {
+    if (model.pinned.some(function (e) { return e.tabKey === tab.id; })) return;
+    take(model, tab.id);
+    model.pinned.push(entryFor(model, tab, "p"));
+}
+
+function groupNamed(model, name) {
+    var wanted = (name || "").trim();
+    if (!wanted) return null;
+    for (var i = 0; i < model.groups.length; i++) {
+        if (model.groups[i].name.toLowerCase() === wanted.toLowerCase()) return model.groups[i];
+    }
+    var group = { id: newId(model, "g"), name: wanted, members: [] };
+    model.groups.push(group);
+    return group;
 }
 
 function assign(model, tab, name) {
-    var wanted = (name || "").trim();
-    if (!wanted) return;
-    model.essentials.forEach(function (e) { if (e.tabKey === tab.id) e.tabKey = null; });
-    removeMember(model, tab.id);
-    var group = null;
-    for (var i = 0; i < model.groups.length; i++) {
-        if (model.groups[i].name.toLowerCase() === wanted.toLowerCase()) group = model.groups[i];
-    }
-    if (!group) {
-        group = { id: newId(model, "g"), name: wanted, members: [] };
-        model.groups.push(group);
-    }
-    group.members.push({ browser: tab.browser, url: tab.url || "", tabKey: tab.id });
+    if (!(name || "").trim()) return;
+    take(model, tab.id);
+    groupNamed(model, name).members.push(entryFor(model, tab, "m"));
+}
+
+// A pinned tab or group member to another group, or with no name to the
+// Pinned rows, keeping what it is.
+function moveEntry(model, id, name) {
+    var e = findEntry(model, id);
+    if (!e || model.essentials.indexOf(e) >= 0) return false;
+    if (name !== null && !(name || "").trim()) return false;
+    removeEntry(model, id);
+    if (name === null) model.pinned.push(e);
+    else groupNamed(model, name).members.push(e);
+    return true;
 }
 
 // Every source's tabs and windows under merged keys, with the model laid
-// over them in the shape grid/tabs.js builds the column from.
+// over them in the shape grid/tabs.js builds the column from: each entry
+// with `tabId`, its live tab or null, and each tab with the `entry` that
+// shows it (and its `essential` or `group`), or null for a loose tab.
 function merge(model, sources) {
     var tabs = [], windows = [], icons = {}, browsers = [];
     sources.forEach(function (s) {
@@ -222,29 +277,28 @@ function merge(model, sources) {
                         windowId: s.id + "/" + t.windowId, index: t.index || 0, title: t.title || "",
                         url: t.url || "", icon: t.icon || "", active: !!t.active, audible: !!t.audible,
                         pinned: !!t.pinned, hidden: !!t.hidden, lastAccessed: t.lastAccessed || 0,
-                        essential: null, group: null });
+                        essential: null, entry: null, group: null });
         });
     });
     var byId = {};
     tabs.forEach(function (t) { byId[t.id] = t; });
-    var essentials = model.essentials.map(function (e) {
-        var live = e.tabKey !== null && byId[e.tabKey] ? e.tabKey : null;
-        if (live) byId[live].essential = e.id;
+    // One tab, one entry: the first to claim it.
+    function shown(e, mark) {
+        var t = e.tabKey !== null ? byId[e.tabKey] || null : null;
+        if (t && t.entry) t = null;
+        if (t) { t.entry = e.id; mark(t); }
         // The live tab's own icon beats the one saved at pin time.
-        return { id: e.id, title: e.title, url: e.url, browser: e.browser, tabId: live,
-                 icon: live && byId[live].icon && icons[byId[live].icon] ? byId[live].icon : e.icon };
-    });
+        var icon = t && t.icon && icons[t.icon] ? t.icon : e.icon;
+        if (icon && !icons[icon] && /^(data:|https?:)/.test(icon)) icons[icon] = icon;
+        return { id: e.id, title: e.title, url: e.url, browser: e.browser, tabId: t ? t.id : null, icon: icon };
+    }
+    var essentials = model.essentials.map(function (e) { return shown(e, function (t) { t.essential = e.id; }); });
+    var pinned = model.pinned.map(function (e) { return shown(e, function () {}); });
     var groups = model.groups.map(function (g) {
-        var ids = [];
-        g.members.forEach(function (m) {
-            var t = m.tabKey !== null ? byId[m.tabKey] : null;
-            if (t && !t.essential && !t.group) { t.group = g.id; ids.push(t.id); }
-        });
-        return { id: g.id, name: g.name, tabIds: ids };
+        return { id: g.id, name: g.name,
+                 members: g.members.map(function (m) { return shown(m, function (t) { t.group = g.id; }); }) };
     });
-    // A saved icon is a data or web URL itself; make it resolvable like the rest.
-    essentials.forEach(function (e) { if (e.icon && !icons[e.icon] && /^(data:|https?:)/.test(e.icon)) icons[e.icon] = e.icon; });
-    return { windows: windows, tabs: tabs, essentials: essentials, groups: groups, icons: icons, browsers: browsers };
+    return { windows: windows, tabs: tabs, essentials: essentials, pinned: pinned, groups: groups, icons: icons, browsers: browsers };
 }
 
 function titleMatches(windowTitle, activeTitle) {

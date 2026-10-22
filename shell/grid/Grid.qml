@@ -52,7 +52,26 @@ PanelWindow {
     // hints, and the column keeps only what matches.
     property bool searching: false
     property string tabQuery: ""
-    readonly property var tabsModel: TabsJs.build(Services.BrowserTabs.snapshot, searching ? tabQuery : null, frozenAccess)
+    readonly property var tabsModel: TabsJs.build(Services.BrowserTabs.snapshot, searching ? tabQuery : null, frozenAccess, expandedGroups)
+    // Groups show as one header row each; these are the ones opened since
+    // the grid did (group id -> true). A search expands its matches itself.
+    property var expandedGroups: ({})
+    // Open or close a group, the selection on its header unless `stay`.
+    function setExpanded(groupId, on, stay) {
+        const next = Object.assign({}, expandedGroups);
+        if (on) next[groupId] = true; else delete next[groupId];
+        expandedGroups = next;
+        if (stay) return;
+        const i = tabsModel.selectables.findIndex(x => x.key === "g:" + groupId);
+        if (i >= 0) { typedLast = false; tabSel = i; }
+    }
+    // Esc or Backspace while a group's label is typed: drop it, and close
+    // the group it opened.
+    function clearHint() {
+        const g = tabsModel.selectables.find(x => x.kind === "group" && x.expanded && x.base === hintPrefix);
+        hintPrefix = "";
+        if (g) setExpanded(g.groupId, false);
+    }
     // Preview: while the selection is in the tab column, the browser comes
     // forward behind the grid and follows it tab by tab; the rolls and the
     // glass outside the column step aside so it shows. Enter keeps the tab,
@@ -72,9 +91,9 @@ PanelWindow {
         // The shell's recency, as Ctrl+Tab orders them (see tabs/mru.js).
         for (const t of (Services.BrowserTabs.snapshot?.tabs ?? [])) access[t.id] = Services.BrowserTabs.recency(t);
         frozenAccess = access;
-        const here = TabsJs.build(Services.BrowserTabs.snapshot, null, access).selectables.find(x => x.here);
+        const here = TabsJs.build(Services.BrowserTabs.snapshot, null, access).hereTab;
         const top = Hyprland.activeToplevel;
-        origin = { tabId: here ? here.tabId : null, address: top ? addr(top) : "" };
+        origin = { tabId: here, address: top ? addr(top) : "" };
         previewed = false; previewKey = "";
     }
     function undoPreview() {
@@ -105,7 +124,8 @@ PanelWindow {
         onTriggered: {
             const item = win.selectedTab;
             if (!win.previewing || !item || item.key === win.previewKey) return;
-            if (item.kind !== "tab" && !(item.kind === "essential" && item.tabId !== null && item.tabId !== undefined)) return;
+            // Only entries with a tab: not "New tab", a group, or a closed one.
+            if (!item.tabId) return;
             win.previewKey = item.key; win.previewed = true;
             Services.BrowserTabs.preview(item);
         }
@@ -121,7 +141,12 @@ PanelWindow {
         searching = true; hintPrefix = ""; zone = "tabs"; userMoved = true;
         setQuery("");
     }
-    function stopSearch() { searching = false; tabQuery = ""; }
+    // A member the search found stays in view: its group stays open.
+    function stopSearch() {
+        const sel = selectedTab;
+        if (sel && sel.kind === "entry" && sel.groupId && !expandedGroups[sel.groupId]) setExpanded(sel.groupId, true, true);
+        searching = false; tabQuery = "";
+    }
     property string zone: "grid"       // grid | tabs
     property int tabSel: 0
     property string hintPrefix: ""
@@ -152,7 +177,9 @@ PanelWindow {
         tabSel = Math.max(0, Math.min(n - 1, tabSel + d));
     }
     // A completed hint opens its entry; with Shift it only selects it, for
-    // the palette's actions.
+    // the palette's actions. A group's label opens the group and stays typed,
+    // so its members' labels, which continue it, finish the sequence; the
+    // label typed again closes the group.
     function typeHint(ch, selectOnly) {
         let res = TabsJs.resolve(tabsModel.selectables, hintPrefix + ch);
         // A letter that leads nowhere after a prefix starts over.
@@ -160,7 +187,12 @@ PanelWindow {
             hintPrefix = "";
             res = TabsJs.resolve(tabsModel.selectables, ch);
         }
-        if (res.exact) {
+        if (res.exact && res.exact.kind === "group") {
+            hintPrefix = ""; zone = "tabs"; userMoved = true;
+            const opening = !res.exact.expanded;
+            setExpanded(res.exact.groupId, opening);
+            if (opening) hintPrefix = res.exact.base;
+        } else if (res.exact) {
             hintPrefix = ""; typedLast = false;
             tabSel = res.exact.index; zone = "tabs"; userMoved = true;
             if (!selectOnly) activateTab(res.exact);
@@ -168,6 +200,7 @@ PanelWindow {
     }
     function activateTab(item) {
         if (!item || phase !== "open") return;
+        if (item.kind === "group") { hintPrefix = ""; setExpanded(item.groupId, !item.expanded); return; }
         previewed = false;   // keep what was previewed: it is the choice
         previewTimer.stop();
         phase = "activating";
@@ -226,7 +259,7 @@ PanelWindow {
         }
         selRow = pos.r; selCol = Math.max(0, Math.min(pos.c, (rs[pos.r]?.cells.length ?? 1) - 1));
         selEnv = rs[pos.r]?.envId ?? "";
-        zone = "grid"; hintPrefix = ""; searching = false; tabQuery = ""; typedLast = false;
+        zone = "grid"; hintPrefix = ""; searching = false; tabQuery = ""; typedLast = false; expandedGroups = ({});
         userMoved = false;
     }
     // Hover selects only once the pointer has moved since the open (see
@@ -527,7 +560,7 @@ PanelWindow {
                 ev.accepted = true; return;
             }
             if (win.hintPrefix !== "" && (ev.key === Qt.Key_Escape || ev.key === Qt.Key_Backspace)) {
-                win.hintPrefix = ""; ev.accepted = true; return;
+                win.clearHint(); ev.accepted = true; return;
             }
             if (win.zone === "tabs") {
                 switch (ev.key) {
@@ -538,6 +571,12 @@ PanelWindow {
                 case Qt.Key_Right: case Qt.Key_L: win.zone = "grid"; break;
                 case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Space: win.activate(); break;
                 case Qt.Key_Escape: win.close(); break;
+                // Close the open group the selection is in.
+                case Qt.Key_Backspace: {
+                    const sel = win.selectedTab;
+                    if (sel && sel.groupId && (sel.kind === "entry" || sel.expanded)) win.setExpanded(sel.groupId, false);
+                    break;
+                }
                 default: return;
                 }
                 ev.accepted = true; return;
@@ -924,10 +963,8 @@ PanelWindow {
             visible: win.tabsShown
             x: win.panelX; y: Theme.s8
             width: win.panelW; height: win.height - Theme.s8 * 2
-            // One short line; the palette (Ctrl+P) lists the rest.
-            keyHints: win.searching ? "Enter opens · Esc clears"
-                : win.zone === "tabs" ? "Shift+key selects · / search"
-                : "/ search tabs · Ctrl+P actions"
+            // Only beside the rolls: in the column the hints say it all.
+            keyHints: win.zone === "grid" && !win.searching ? "/ search tabs · Ctrl+P actions" : ""
             model: win.tabsModel
             selIndex: win.zone === "tabs" ? win.tabSel : -1
             prefix: win.hintPrefix
@@ -954,14 +991,28 @@ PanelWindow {
         const cell = win.zone === "grid" ? win.selectedCell : null; const row = win.zone === "grid" ? win.selectedRow : null;
         const list = [];
         const tab = win.selectedTab;
+        const groupName = tab && tab.groupId ? (Services.BrowserTabs.model.groups.find(g => g.id === tab.groupId) || {}).name || "" : "";
         if (tab && tab.kind === "tab") {
             list.push({ id: "tab-open", scope: "tab", title: "Open tab" });
             list.push({ id: "tab-pin", scope: "tab", title: "Pin to Essentials" });
+            list.push({ id: "tab-pin-row", scope: "tab", title: "Pin tab" });
             list.push({ id: "tab-group", scope: "tab", title: "Move to group…", needsText: true, prompt: "Group", defaultText: "" });
-            if (tab.groupId) list.push({ id: "tab-ungroup", scope: "tab", title: "Remove from group" });
-            if (tab.groupId) list.push({ id: "group-rename", scope: "group", title: "Rename group", needsText: true, prompt: "Name", defaultText: (win.tabsModel.sections.find(s => s.groupId === tab.groupId) || {}).title || "" });
-            if (tab.groupId) list.push({ id: "group-delete", scope: "group", title: "Delete group (tabs stay open)" });
             list.push({ id: "tab-close", scope: "tab", title: "Close tab" });
+        } else if (tab && tab.kind === "entry") {
+            const pinned = tab.place === "pinned";
+            const scope = pinned ? "pinned" : "group";
+            list.push({ id: "tab-open", scope: scope, title: tab.open ? "Open tab" : "Open its page" });
+            if (tab.open) list.push({ id: "tab-pin", scope: scope, title: "Pin to Essentials" });
+            if (!pinned) list.push({ id: "tab-pin-row", scope: scope, title: "Pin tab" });
+            list.push({ id: "tab-group", scope: scope, title: "Move to group…", needsText: true, prompt: "Group", defaultText: "" });
+            list.push({ id: "entry-remove", scope: scope, title: pinned ? "Unpin" : "Remove from group" });
+            if (tab.open) list.push({ id: "tab-close", scope: scope, title: pinned ? "Close its tab (stays pinned)" : "Close its tab (stays in the group)" });
+            if (!pinned) list.push({ id: "group-rename", scope: "group", title: "Rename group", needsText: true, prompt: "Name", defaultText: groupName });
+            if (!pinned) list.push({ id: "group-delete", scope: "group", title: "Delete group (its tabs stay open)" });
+        } else if (tab && tab.kind === "group") {
+            list.push({ id: "tab-open", scope: "group", title: tab.expanded ? "Collapse group" : "Expand group" });
+            list.push({ id: "group-rename", scope: "group", title: "Rename group", needsText: true, prompt: "Name", defaultText: groupName });
+            list.push({ id: "group-delete", scope: "group", title: "Delete group (its tabs stay open)" });
         } else if (tab && tab.kind === "essential") {
             list.push({ id: "tab-open", scope: "essential", title: "Open essential" });
             list.push({ id: "essential-rename", scope: "essential", title: "Rename essential", needsText: true, prompt: "Name", defaultText: tab.title });
@@ -1033,13 +1084,14 @@ PanelWindow {
         switch (action.id) {
         case "tab-open": win.activateTab(tab); break;
         case "tab-pin": if (tab) tabs.pin(tab.tabId); break;
-        case "tab-group": if (tab && text.trim()) tabs.assign(tab.tabId, text); break;
-        case "tab-ungroup": if (tab) tabs.unassign(tab.tabId); break;
+        case "tab-pin-row": if (tab) { if (tab.kind === "entry") tabs.moveEntry(tab.id, null); else tabs.pinTab(tab.tabId); } break;
+        case "tab-group": if (tab && text.trim()) { if (tab.kind === "entry") tabs.moveEntry(tab.id, text); else tabs.assign(tab.tabId, text); } break;
+        case "entry-remove": if (tab) tabs.removeEntry(tab.id); break;
         case "tab-close": if (tab) tabs.close(tab.tabId); break;
         case "group-rename": if (tab) tabs.renameGroup(tab.groupId, text); break;
         case "group-delete": if (tab) tabs.deleteGroup(tab.groupId); break;
         case "essential-rename": if (tab) tabs.renameEssential(tab.id, text); break;
-        case "essential-unpin": if (tab) tabs.unpin(tab.id); break;
+        case "essential-unpin": if (tab) tabs.removeEntry(tab.id); break;
         case "browser-new": if (win.phase === "open") { win.phase = "activating"; win.hide(); afterRelease.run(() => tabs.open({ kind: "new", text: text })); } break;
         case "browser-pin-active": tabs.pinFront(); break;
         case "open": win.activate(); break;

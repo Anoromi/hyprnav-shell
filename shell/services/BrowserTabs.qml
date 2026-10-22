@@ -22,8 +22,8 @@ import "../tabs/mru.js" as Mru
 // Commands: activate {tabId}, create {url} | {search}, close {tabId}, refresh,
 //           legacy-ack
 //
-// Essentials and groups belong to the shell, not to a browser (see
-// tabs/model.js), and live in $HNS_TABS_STATE.
+// Essentials, pinned tabs and groups belong to the shell, not to a browser
+// (see tabs/model.js), and live in $HNS_TABS_STATE.
 Singleton {
     id: root
 
@@ -166,7 +166,7 @@ Singleton {
     function open(item) {
         if (!item) return;
         if (item.kind === "tab") activate(item.tabId);
-        else if (item.kind === "essential") openEssential(item.id);
+        else if (item.kind === "essential" || item.kind === "entry") openEntry(item.id);
         else if (item.kind === "new") create(item.text || "", null);
     }
     function activate(key) {
@@ -175,22 +175,23 @@ Singleton {
         stamp(t.id);
         withWindow(t.windowId, () => sendTo(t.source, { type: "activate", tabId: t.rawId }));
     }
-    // An essential shows its own tab when it has one, else opens its home
-    // page in the browser it was pinned from (or the one in front) and takes
-    // the new tab: the first one that source shows next (see claimOpened).
-    property var _opening: null        // { essential, source, known }
+    // An essential, pinned tab or group member shows its own tab when it
+    // has one, else opens its home page in the browser it was saved from (or
+    // the one in front) and takes the new tab: the first one that source
+    // shows next (see claimOpened).
+    property var _opening: null        // { entry, source, known }
     Timer { id: openingTimer; interval: 10000; onTriggered: root._opening = null }
-    function openEssential(id) {
-        const e = model.essentials.find(x => x.id === id);
+    function openEntry(id) {
+        const e = Model.findEntry(model, id);
         if (!e) return;
-        const live = (snapshot?.essentials ?? []).find(x => x.id === id);
-        if (live && live.tabId) { activate(live.tabId); return; }
-        if (_opening && _opening.essential === id) return;
+        const live = e.tabKey ? tab(e.tabKey) : null;
+        if (live && live.entry === id) { activate(live.id); return; }
+        if (_opening && _opening.entry === id) return;
         const source = create(e.url, e.browser);
         if (!source) return;
         const known = {};
         for (const t of snapshot.tabs) if (t.source === source) known[t.id] = true;
-        _opening = { essential: id, source: source, known: known };
+        _opening = { entry: id, source: source, known: known };
         openingTimer.restart();
     }
     // A new tab in `browser` (or the one in front) for typed text. Returns
@@ -213,8 +214,7 @@ Singleton {
     // to it. Only entries that already have a tab preview.
     function preview(item) {
         if (!item) return;
-        const key = item.kind === "tab" || item.kind === "essential" ? item.tabId : null;
-        const t = key ? tab(key) : null;
+        const t = item.tabId ? tab(item.tabId) : null;
         if (!t) return;
         withWindow(t.windowId, () => sendTo(t.source, { type: "activate", tabId: t.rawId }));
     }
@@ -257,16 +257,20 @@ Singleton {
         if (t && /^https?:\/\//i.test(t.url)) Quickshell.execDetached(["wl-copy", "--", t.url]);
     }
 
-    // Essentials and groups (see tabs/model.js), changed here and saved.
+    // Essentials, pinned tabs and groups (see tabs/model.js), changed here
+    // and saved.
     function pin(key) { const t = tab(key); if (t) { Model.pin(model, t); _changed(); } }
     function pinFront() { const t = frontTab(); if (t) { Model.pin(model, t); _changed(); } }
-    function unpin(id) { model.essentials = model.essentials.filter(e => e.id !== id); _changed(); }
+    function pinTab(key) { const t = tab(key); if (t) { Model.pinTab(model, t); _changed(); } }
+    // Unpin, or take out of its group: the only way an entry goes.
+    function removeEntry(id) { if (Model.removeEntry(model, id)) _changed(); }
+    // To a group by name, or to the Pinned rows with a null name.
+    function moveEntry(id, name) { if (Model.moveEntry(model, id, name)) _changed(); }
     function renameEssential(id, title) {
         const e = model.essentials.find(x => x.id === id);
         if (e && title.trim()) { e.title = title.trim(); _changed(); }
     }
     function assign(key, name) { const t = tab(key); if (t) { Model.assign(model, t, name); _changed(); } }
-    function unassign(key) { if (Model.removeMember(model, key)) _changed(); }
     function renameGroup(id, name) {
         const g = model.groups.find(x => x.id === id);
         if (g && name.trim()) { g.name = name.trim(); _changed(); }

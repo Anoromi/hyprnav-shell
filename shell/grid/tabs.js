@@ -4,8 +4,9 @@
 // computed from a BrowserTabs snapshot (see tabs/model.js merge()). Tab ids
 // are "<source>/<id>" strings. Plain functions so node can test them.
 
-// Dvorak home row: the keys under the fingers.
-var ALPHABET = "aoeuidhtns";
+// Dvorak home row, right hand first, index fingers leading: the first
+// rows get the comfortable keys.
+var ALPHABET = "htnsdueoai";
 
 // Prefix-free labels, Vimium style: as many one-letter labels as fit, and the
 // remaining letters lead two-letter ones. With k letters, p prefixes give
@@ -42,18 +43,25 @@ function matches(query, title, url) {
     return true;
 }
 
-// Essentials first (as icons), then "New tab", then each group's open tabs
-// and every other tab, each most recently used first. A string `query`, even
-// an empty one, means a search: it keeps only what matches and lists "New
-// tab" last, where the search draws it, turning it into opening the query
-// once there is one. A null or missing `query` is the plain column.
+// Essentials first (as icons, with the "New tab" tile after them), then the
+// Pinned rows, the groups, most recently used first, and every other tab,
+// most recently used first. A group is one header row until it is
+// expanded: `expanded` maps group ids to true. A string `query`, even an
+// empty one, means a search: it keeps only what matches, expands the groups
+// with matches once something is typed, and lists "New tab" last, turning
+// it into opening the query. A null or missing `query` is the plain column.
 // `frozen` maps tab ids to the last-used times to sort by instead of the live
 // ones: previews switch tabs while the grid is open, and the list must not
 // reshuffle under the pointer. `selectables` is that same
 // order flattened; each item carries its `index` there and its `hint`.
-function build(snapshot, query, frozen) {
+//
+// Hints: everything outside the groups, and each group's header, share one
+// prefix-free set. An expanded group's members continue its header's label
+// L: L plus a label over the alphabet without L's first letter. The header
+// itself then answers to L typed twice, which collapses it again.
+function build(snapshot, query, frozen, expanded) {
     var essentials = [], sections = [], selectables = [];
-    if (!snapshot) return { essentials: essentials, sections: sections, selectables: selectables };
+    if (!snapshot) return { essentials: essentials, sections: sections, selectables: selectables, hereTab: null };
     var tabs = (snapshot.tabs || []).map(function (t) {
         if (!frozen || frozen[t.id] === undefined) return t;
         var copy = {};
@@ -61,6 +69,7 @@ function build(snapshot, query, frozen) {
         copy.lastAccessed = frozen[t.id];
         return copy;
     });
+    var open = expanded || {};
     // Icons arrive once per site in `icons`, keyed by what each entry names.
     var icons = snapshot.icons || {};
     function icon(key) { return icons[key] || ""; }
@@ -75,15 +84,30 @@ function build(snapshot, query, frozen) {
     for (var h = 0; h < tabs.length; h++) {
         if (tabs[h].active && (tabs[h].lastAccessed || 0) > hereAt) { hereTab = tabs[h].id; hereAt = tabs[h].lastAccessed || 0; }
     }
-    function tabItem(tab, groupId) {
+    function tabItem(tab) {
         return {
             kind: "tab", key: "t:" + tab.id, tabId: tab.id, windowId: tab.windowId,
             title: tab.title || hostOf(tab.url) || tab.url, url: tab.url, host: hostOf(tab.url),
-            icon: icon(tab.icon), active: tab.active, here: tab.id === hereTab,
-            audible: tab.audible, groupId: groupId, lastAccessed: tab.lastAccessed || 0,
+            icon: icon(tab.icon), active: tab.active, here: tab.id === hereTab, open: true,
+            audible: tab.audible, groupId: null, lastAccessed: tab.lastAccessed || 0,
             browser: tab.browser || "", badge: badge(tab.browser)
         };
     }
+    // A pinned tab or group member: its live tab's title and place while it
+    // has one, its own when closed.
+    function entryItem(x, place, groupId) {
+        var live = x.tabId !== null && x.tabId !== undefined ? byId[x.tabId] || null : null;
+        var url = live ? live.url : x.url;
+        return {
+            kind: "entry", key: (place === "pinned" ? "p:" : "m:") + x.id, id: x.id, place: place,
+            tabId: live ? live.id : null, windowId: live ? live.windowId : null, open: live !== null,
+            title: (live && live.title) || x.title || hostOf(x.url) || x.url, url: url, host: hostOf(url),
+            icon: icon(x.icon), active: live ? live.active : false, here: live !== null && live.id === hereTab,
+            audible: live ? !!live.audible : false, groupId: groupId, lastAccessed: live ? live.lastAccessed || 0 : 0,
+            browser: x.browser || "", badge: badge(x.browser)
+        };
+    }
+    function recent(a, b) { return b.lastAccessed - a.lastAccessed || a.order - b.order; }
 
     var es = (snapshot.essentials || []).filter(function (x) { return matches(query, x.title, x.url); });
     for (var e = 0; e < es.length; e++) {
@@ -100,43 +124,69 @@ function build(snapshot, query, frozen) {
     var newTab = q === "" ? { kind: "new", key: "new", title: "New tab", text: "" }
         : { kind: "new", key: "new", title: "Open “" + q + "” in a new tab", text: q };
 
-    var groups = snapshot.groups || [];
-    for (var g = 0; g < groups.length; g++) {
-        var items = [];
-        var ids = groups[g].tabIds || [];
-        for (var i = 0; i < ids.length; i++) {
-            var gt = byId[ids[i]];
-            if (gt && matches(query, gt.title, gt.url)) items.push(tabItem(gt, groups[g].id));
-        }
-        // Most recently used first, like the rest.
-        items.sort(function (a, b) { return b.lastAccessed - a.lastAccessed; });
-        if (items.length > 0) sections.push({ key: "g:" + groups[g].id, title: groups[g].name, groupId: groups[g].id, items: items });
-    }
-    var loose = tabs.filter(function (x) { return !x.essential && !x.group && matches(query, x.title, x.url); })
-        .sort(function (a, b) { return (b.lastAccessed || 0) - (a.lastAccessed || 0) || (a.windowId < b.windowId ? -1 : a.windowId > b.windowId ? 1 : 0) || a.index - b.index; });
-    if (loose.length > 0) {
-        sections.push({ key: "loose", title: "Tabs", groupId: null, items: loose.map(function (x) { return tabItem(x, null); }) });
-    }
+    var pinned = (snapshot.pinned || []).map(function (x) { return entryItem(x, "pinned", null); })
+        .filter(function (x) { return matches(query, x.title, x.url); });
+    if (pinned.length > 0) sections.push({ key: "pinned", title: "Pinned", items: pinned, groups: [] });
+
+    var groups = [];
+    (snapshot.groups || []).forEach(function (g, order) {
+        var all = (g.members || []).map(function (m, i) { var it = entryItem(m, "group", g.id); it.order = i; return it; });
+        if (all.length === 0) return;
+        all.sort(recent);
+        // A word of the group's name counts for every member.
+        var hits = all.filter(function (x) { return matches(query, x.title + " " + g.name, x.url); });
+        if (hits.length === 0) return;
+        var shown = (searching && q !== "") || open[g.id] === true;
+        var header = {
+            kind: "group", key: "g:" + g.id, groupId: g.id, title: g.name, expanded: shown,
+            count: all.length, openCount: all.filter(function (x) { return x.open; }).length,
+            icons: all.slice(0, 3).map(function (x) { return { icon: x.icon, fallback: x.host || x.title }; }),
+            here: !shown && all.some(function (x) { return x.here; }), base: ""
+        };
+        groups.push({ key: header.key, header: header, expanded: shown, items: shown ? hits : [],
+                      lastAccessed: all[0].lastAccessed, order: order });
+    });
+    groups.sort(recent);
+    if (groups.length > 0) sections.push({ key: "groups", title: "", items: [], groups: groups });
+
+    var loose = tabs.filter(function (x) { return !x.entry && !x.essential && !x.group && matches(query, x.title, x.url); })
+        .sort(function (a, b) { return (b.lastAccessed || 0) - (a.lastAccessed || 0) || (a.windowId < b.windowId ? -1 : a.windowId > b.windowId ? 1 : 0) || a.index - b.index; })
+        .map(tabItem);
+    if (loose.length > 0) sections.push({ key: "loose", title: "Tabs", items: loose, groups: [] });
 
     selectables = searching ? essentials.slice() : essentials.concat([newTab]);
-    for (var s = 0; s < sections.length; s++) selectables = selectables.concat(sections[s].items);
-    if (searching) selectables.push(newTab);
-    var labels = hintLabels(selectables.length);
-    for (var n = 0; n < selectables.length; n++) {
-        selectables[n].index = n;
-        selectables[n].hint = labels[n] || "";
-    }
-    return { essentials: essentials, newTab: newTab, sections: sections, selectables: selectables };
+    selectables = selectables.concat(pinned);
+    var top = selectables.slice();
+    groups.forEach(function (gr) { selectables.push(gr.header); top.push(gr.header); selectables = selectables.concat(gr.items); });
+    selectables = selectables.concat(loose);
+    top = top.concat(loose);
+    if (searching) { selectables.push(newTab); top.push(newTab); }
+    var labels = hintLabels(top.length);
+    for (var n = 0; n < top.length; n++) top[n].hint = labels[n] || "";
+    groups.forEach(function (gr) {
+        var base = gr.header.hint;
+        gr.header.base = base;
+        if (!gr.expanded) return;
+        var sub = base ? hintLabels(gr.items.length, ALPHABET.replace(base[0], "")) : [];
+        gr.header.hint = base ? base + base : "";
+        gr.items.forEach(function (x, i) { x.hint = sub[i] ? base + sub[i] : ""; });
+    });
+    for (var m = 0; m < selectables.length; m++) selectables[m].index = m;
+    return { essentials: essentials, newTab: newTab, sections: sections, selectables: selectables, hereTab: hereTab };
 }
 
 // Where a search puts the selection: the first match once something is
-// typed; before that the tab showing ("here"), else the first tab.
+// typed (not a group's header: Enter there would only fold it); before that
+// the tab showing ("here"), else the first tab.
 function searchStart(selectables, query) {
-    if ((query || "").trim() !== "") return 0;
+    if ((query || "").trim() !== "") {
+        for (var j = 0; j < selectables.length; j++) if (selectables[j].kind !== "group") return j;
+        return 0;
+    }
     var first = -1;
     for (var i = 0; i < selectables.length; i++) {
         if (selectables[i].here) return i;
-        if (first < 0 && selectables[i].kind === "tab") first = i;
+        if (first < 0 && (selectables[i].kind === "tab" || selectables[i].kind === "entry")) first = i;
     }
     return Math.max(0, first);
 }
