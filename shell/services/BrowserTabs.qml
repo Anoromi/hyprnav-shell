@@ -18,9 +18,9 @@ import "../tabs/mru.js" as Mru
 // Snapshot: { windows: [{ id, focused, activeTitle }],
 //             tabs: [{ id, windowId, index, title, url, icon, active, audible,
 //                      pinned, hidden, lastAccessed }],
-//             icons: { <tab.icon>: <image URL> }, legacy? }
+//             icons: { <tab.icon>: <image URL> }, caps?: ["navigate"], legacy? }
 // Commands: activate {tabId}, create {url} | {search}, close {tabId}, refresh,
-//           legacy-ack
+//           legacy-ack, and with "navigate" in caps navigate {tabId, url}
 //
 // Essentials, pinned tabs and groups belong to the shell, not to a browser
 // (see tabs/model.js), and live in $HNS_TABS_STATE.
@@ -209,6 +209,33 @@ Singleton {
         return source;
     }
     function close(key) { const t = tab(key); if (t) sendTo(t.source, { type: "close", tabId: t.rawId }); }
+    function can(sourceId, cap) { return (_raw[sourceId]?.snapshot?.caps ?? []).includes(cap); }
+
+    // An entry's own tab, while it has one.
+    function entryTab(e) {
+        const live = e && e.tabKey ? tab(e.tabKey) : null;
+        return live && live.entry === e.id ? live : null;
+    }
+    // Where its tab is now becomes the entry's home.
+    function replaceUrl(id) {
+        const e = Model.findEntry(model, id);
+        if (e && Model.replaceUrl(model, id, entryTab(e), snapshot?.icons)) _changed();
+    }
+    // Its tab back to the home page: in place where the extension can
+    // navigate, else (an older one, loaded before the browser restarted) a
+    // fresh tab on the home page takes the old one's place.
+    function reset(id) {
+        const e = Model.findEntry(model, id);
+        const live = entryTab(e);
+        const how = Model.resetAction(e, live, live ? can(live.source, "navigate") : false);
+        if (how === "navigate") sendTo(live.source, { type: "navigate", tabId: live.rawId, url: e.url });
+        else if (how === "reopen") {
+            e.tabKey = null; e.tabUrl = e.url;
+            openEntry(id);
+            close(live.id);
+            _changed();
+        }
+    }
 
     // Show a tab behind the open grid: its window comes forward and switches
     // to it. Only entries that already have a tab preview.
@@ -259,9 +286,20 @@ Singleton {
 
     // Essentials, pinned tabs and groups (see tabs/model.js), changed here
     // and saved.
-    function pin(key) { const t = tab(key); if (t) { Model.pin(model, t); _changed(); } }
+    // Pinning returns the new entry's id, for the selection to follow it.
+    function pin(key) {
+        const t = tab(key);
+        if (!t) return "";
+        Model.pin(model, t); _changed();
+        return model.essentials.find(e => e.tabKey === key)?.id ?? "";
+    }
     function pinFront() { const t = frontTab(); if (t) { Model.pin(model, t); _changed(); } }
-    function pinTab(key) { const t = tab(key); if (t) { Model.pinTab(model, t); _changed(); } }
+    function pinTab(key) {
+        const t = tab(key);
+        if (!t) return "";
+        Model.pinTab(model, t); _changed();
+        return model.pinned.find(e => e.tabKey === key)?.id ?? "";
+    }
     // Unpin, or take out of its group: the only way an entry goes.
     function removeEntry(id) { if (Model.removeEntry(model, id)) _changed(); }
     // To a group by name, or to the Pinned rows with a null name.

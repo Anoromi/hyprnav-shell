@@ -257,10 +257,40 @@ function moveEntry(model, id, name) {
     return true;
 }
 
+// An entry's tab has gone somewhere other than its home URL: what Replace
+// URL and Reset act on. A trailing slash is no difference.
+function drifted(e, tab) {
+    if (!e || !tab || !tab.url) return false;
+    function plain(u) { return (u || "").replace(/\/+$/, ""); }
+    return plain(tab.url) !== plain(e.url);
+}
+
+// Make where the entry's tab is now its home, with the tab's title and icon.
+// `icons` maps a tab's icon key to its image URL (see merge).
+function replaceUrl(model, id, tab, icons) {
+    var e = findEntry(model, id);
+    if (!e || !drifted(e, tab)) return false;
+    e.url = tab.url;
+    e.tabUrl = tab.url;
+    if (tab.title) e.title = tab.title;
+    var icon = (icons || {})[tab.icon];
+    if (icon && /^(data:|https?:)/.test(icon)) e.icon = icon;
+    return true;
+}
+
+// How Reset brings an entry's tab home: "navigate" in place where its
+// browser's extension can, else "reopen" (close it and open the home page);
+// null when there is nothing to reset.
+function resetAction(e, tab, canNavigate) {
+    if (!drifted(e, tab)) return null;
+    return canNavigate ? "navigate" : "reopen";
+}
+
 // Every source's tabs and windows under merged keys, with the model laid
 // over them in the shape grid/tabs.js builds the column from: each entry
-// with `tabId`, its live tab or null, and each tab with the `entry` that
-// shows it (and its `essential` or `group`), or null for a loose tab.
+// with `tabId`, its live tab or null, and whether that tab has `drifted`
+// from home, and each tab with the `entry` that shows it (and its
+// `essential` or `group`), or null for a loose tab.
 function merge(model, sources) {
     var tabs = [], windows = [], icons = {}, browsers = [];
     sources.forEach(function (s) {
@@ -290,7 +320,8 @@ function merge(model, sources) {
         // The live tab's own icon beats the one saved at pin time.
         var icon = t && t.icon && icons[t.icon] ? t.icon : e.icon;
         if (icon && !icons[icon] && /^(data:|https?:)/.test(icon)) icons[icon] = icon;
-        return { id: e.id, title: e.title, url: e.url, browser: e.browser, tabId: t ? t.id : null, icon: icon };
+        return { id: e.id, title: e.title, url: e.url, browser: e.browser, tabId: t ? t.id : null, icon: icon,
+                 drifted: drifted(e, t) };
     }
     var essentials = model.essentials.map(function (e) { return shown(e, function (t) { t.essential = e.id; }); });
     var pinned = model.pinned.map(function (e) { return shown(e, function () {}); });

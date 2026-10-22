@@ -10,7 +10,7 @@ function load(file, names) {
   return new Function(`${source}; return { ${names.join(", ")} };`)();
 }
 const M = load("tabs/model.js", ["CLASSES", "emptyModel", "normalize", "importLegacy", "relink", "claimOpened", "removeEntry",
-  "dropClosed", "pin", "pinTab", "assign", "moveEntry", "merge", "resolveWindow", "windowForClient", "interpretInput"]);
+  "dropClosed", "pin", "pinTab", "assign", "moveEntry", "merge", "drifted", "replaceUrl", "resetAction", "resolveWindow", "windowForClient", "interpretInput"]);
 const R = load("tabs/mru.js", ["recency", "order", "stamp"]);
 const S = load("tabswitch/tabswitch.js", ["start", "step"]);
 
@@ -156,6 +156,31 @@ test("pinned tabs and group members outlive their tabs and a restart", () => {
   assert.equal(M.claimOpened(loaded, { entry: "m1", source: "n", known: { "n/7": true, "n/8": true, "n/9": true } },
     tabs.concat([{ ...tab(10, ""), id: "n/10", source: "n", browser: "island" }])), true);
   assert.equal(loaded.groups[0].members[0].tabKey, "n/10");
+});
+
+test("an entry whose tab drifted from home can take its URL or go back", () => {
+  const model = M.normalize({
+    essentials: [{ id: "e1", title: "Mail", url: "https://mail.test/", icon: "data:old", browser: "island", tabKey: "s/1", tabUrl: "https://mail.test/" }],
+    pinned: [{ id: "p1", title: "Docs", url: "https://docs.test/a", browser: "island", tabKey: null, tabUrl: "" }],
+  });
+  const snap = (url) => ({ windows: [{ id: 1 }], tabs: [{ ...tab(1, url), title: "Inbox 42", icon: "https://mail.test" }],
+    icons: { "https://mail.test": "data:new" } });
+  const at = (url) => M.merge(model, [{ id: "s", browser: "island", browserPid: 1, snapshot: snap(url) }]);
+  assert.equal(at("https://mail.test").essentials[0].drifted, false, "a trailing slash is no drift");
+  let merged = at("https://mail.test/inbox/42");
+  assert.equal(merged.essentials[0].drifted, true);
+  assert.equal(merged.pinned[0].drifted, false, "no tab, no drift");
+  const live = merged.tabs[0];
+  assert.equal(M.resetAction(model.essentials[0], live, true), "navigate");
+  assert.equal(M.resetAction(model.essentials[0], live, false), "reopen", "an extension without navigate reopens");
+  assert.equal(M.resetAction(model.essentials[0], null, true), null);
+  assert.equal(M.replaceUrl(model, "e1", live, merged.icons), true);
+  assert.deepEqual([model.essentials[0].url, model.essentials[0].title, model.essentials[0].icon, model.essentials[0].tabKey],
+    ["https://mail.test/inbox/42", "Inbox 42", "data:new", "s/1"]);
+  merged = at("https://mail.test/inbox/42");
+  assert.equal(merged.essentials[0].drifted, false);
+  assert.equal(M.resetAction(model.essentials[0], merged.tabs[0], true), null);
+  assert.equal(M.replaceUrl(model, "e1", merged.tabs[0], merged.icons), false, "nothing to replace");
 });
 
 test("groups saved before members kept their tabs migrate", () => {

@@ -103,7 +103,8 @@ function build(snapshot, query, frozen, expanded) {
             tabId: live ? live.id : null, windowId: live ? live.windowId : null, open: live !== null,
             title: (live && live.title) || x.title || hostOf(x.url) || x.url, url: url, host: hostOf(url),
             icon: icon(x.icon), active: live ? live.active : false, here: live !== null && live.id === hereTab,
-            audible: live ? !!live.audible : false, groupId: groupId, lastAccessed: live ? live.lastAccessed || 0 : 0,
+            audible: live ? !!live.audible : false, drifted: live !== null && x.drifted === true,
+            groupId: groupId, lastAccessed: live ? live.lastAccessed || 0 : 0,
             browser: x.browser || "", badge: badge(x.browser)
         };
     }
@@ -114,7 +115,7 @@ function build(snapshot, query, frozen, expanded) {
         essentials.push({
             kind: "essential", key: "e:" + es[e].id, id: es[e].id, title: es[e].title,
             url: es[e].url, icon: icon(es[e].icon), tabId: es[e].tabId,
-            open: es[e].tabId !== null && es[e].tabId !== undefined,
+            open: es[e].tabId !== null && es[e].tabId !== undefined, drifted: es[e].drifted === true,
             here: hereTab !== null && es[e].tabId === hereTab,
             browser: es[e].browser || "", badge: badge(es[e].browser)
         });

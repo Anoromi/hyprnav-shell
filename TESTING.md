@@ -803,3 +803,28 @@ Lab (`scripts/lab.py up`, which binds `XF86Launch5` as live),
 
 Hyprland fires the global once per press, so the double-fire guard is down
 from 300 ms to 80 ms, under any deliberate double tap.
+
+## Replace URL and Reset (2026-10-22)
+
+Essentials, pinned tabs and group members whose tab left their home URL show
+a small hollow dot (the tile's corner, the row's right edge) and get two
+palette actions: "Replace URL with current" makes the tab's page, title and
+icon the entry's home; "Reset" sends `navigate {tabId, url}` when the source's
+snapshot lists it in `caps`, else opens the home page in a new tab, claims it
+and closes the old one. Palette labels are short ("Close", "Pin", "Rename…").
+
+Lab (`scripts/lab.py up`), `scripts/fake-browser-tabs.py --pid 4242` (then
+with `--no-navigate`), tabs moved with the fake's `goto`.
+
+| Case | Result |
+|---|---|
+| Essential and pinned tab moved away | dot on the tile and the row; palette lists Replace URL with current and Reset |
+| Reset on the essential | `navigate` to its home, the dot goes |
+| Replace URL on the pinned tab | home, title and icon are the tab's in the state file, the dot goes |
+| Reset on a member, `--no-navigate` | `create {url}`, then `close`; the new tab is the member's, selection stays on it |
+| Pin a loose tab, then Pin to Essentials | the selection follows to `p:…`, then to `e:…` |
+
+`navigate` in a throwaway headless Chromium (`--user-data-dir` in /tmp, the
+host's manifest in its `NativeMessagingHosts`, its own runtime dir): the
+snapshot carries `caps: ["navigate"]`, the tab loads the home page in place
+with the same id.

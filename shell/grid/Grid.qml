@@ -171,6 +171,11 @@ PanelWindow {
         tabSel = Math.max(0, Math.min(tabSel, tabsModel.selectables.length - 1));
         zone = "tabs"; userMoved = true;
     }
+    // The selection onto an entry by its key, once it moved (pinned, say).
+    function followTab(key) {
+        const i = tabsModel.selectables.findIndex(x => x.key === key);
+        if (i >= 0) tabSel = i;
+    }
     function moveTab(d) {
         const n = tabsModel.selectables.length; if (n === 0) return;
         typedLast = false;
@@ -994,36 +999,44 @@ PanelWindow {
         const list = [];
         const tab = win.selectedTab;
         const groupName = tab && tab.groupId ? (Services.BrowserTabs.model.groups.find(g => g.id === tab.groupId) || {}).name || "" : "";
+        // Essentials, pinned tabs and group members whose tab went elsewhere.
+        function drift(scope) {
+            if (!tab.drifted) return;
+            list.push({ id: "entry-replace-url", scope: scope, title: "Replace URL with current" });
+            list.push({ id: "entry-reset", scope: scope, title: "Reset" });
+        }
         if (tab && tab.kind === "tab") {
-            list.push({ id: "tab-open", scope: "tab", title: "Open tab" });
+            list.push({ id: "tab-open", scope: "tab", title: "Open" });
             list.push({ id: "tab-pin", scope: "tab", title: "Pin to Essentials" });
-            list.push({ id: "tab-pin-row", scope: "tab", title: "Pin tab" });
+            list.push({ id: "tab-pin-row", scope: "tab", title: "Pin" });
             list.push({ id: "tab-group", scope: "tab", title: "Move to group…", needsText: true, prompt: "Group", defaultText: "" });
-            list.push({ id: "tab-close", scope: "tab", title: "Close tab" });
+            list.push({ id: "tab-close", scope: "tab", title: "Close" });
         } else if (tab && tab.kind === "entry") {
             const pinned = tab.place === "pinned";
             const scope = pinned ? "pinned" : "group";
-            list.push({ id: "tab-open", scope: scope, title: tab.open ? "Open tab" : "Open its page" });
+            list.push({ id: "tab-open", scope: scope, title: "Open" });
             if (tab.open) list.push({ id: "tab-pin", scope: scope, title: "Pin to Essentials" });
-            if (!pinned) list.push({ id: "tab-pin-row", scope: scope, title: "Pin tab" });
+            if (!pinned) list.push({ id: "tab-pin-row", scope: scope, title: "Pin" });
             list.push({ id: "tab-group", scope: scope, title: "Move to group…", needsText: true, prompt: "Group", defaultText: "" });
             list.push({ id: "entry-remove", scope: scope, title: pinned ? "Unpin" : "Remove from group" });
-            if (tab.open) list.push({ id: "tab-close", scope: scope, title: pinned ? "Close its tab (stays pinned)" : "Close its tab (stays in the group)" });
-            if (!pinned) list.push({ id: "group-rename", scope: "group", title: "Rename group", needsText: true, prompt: "Name", defaultText: groupName });
-            if (!pinned) list.push({ id: "group-delete", scope: "group", title: "Delete group (its tabs stay open)" });
+            drift(scope);
+            if (tab.open) list.push({ id: "tab-close", scope: scope, title: "Close" });
+            if (!pinned) list.push({ id: "group-rename", scope: "group", title: "Rename group…", needsText: true, prompt: "Name", defaultText: groupName });
+            if (!pinned) list.push({ id: "group-delete", scope: "group", title: "Delete group" });
         } else if (tab && tab.kind === "group") {
-            list.push({ id: "tab-open", scope: "group", title: tab.expanded ? "Collapse group" : "Expand group" });
-            list.push({ id: "group-rename", scope: "group", title: "Rename group", needsText: true, prompt: "Name", defaultText: groupName });
-            list.push({ id: "group-delete", scope: "group", title: "Delete group (its tabs stay open)" });
+            list.push({ id: "tab-open", scope: "group", title: tab.expanded ? "Collapse" : "Expand" });
+            list.push({ id: "group-rename", scope: "group", title: "Rename…", needsText: true, prompt: "Name", defaultText: groupName });
+            list.push({ id: "group-delete", scope: "group", title: "Delete group" });
         } else if (tab && tab.kind === "essential") {
-            list.push({ id: "tab-open", scope: "essential", title: "Open essential" });
-            list.push({ id: "essential-rename", scope: "essential", title: "Rename essential", needsText: true, prompt: "Name", defaultText: tab.title });
+            list.push({ id: "tab-open", scope: "essential", title: "Open" });
+            list.push({ id: "essential-rename", scope: "essential", title: "Rename…", needsText: true, prompt: "Name", defaultText: tab.title });
             list.push({ id: "essential-unpin", scope: "essential", title: "Remove from Essentials" });
-            if (tab.open) list.push({ id: "tab-close", scope: "essential", title: "Close its tab (stays in Essentials)" });
+            drift("essential");
+            if (tab.open) list.push({ id: "tab-close", scope: "essential", title: "Close" });
         }
         if (win.tabsShown) {
             list.push({ id: "browser-new", scope: "browser", title: "Open in new tab…", needsText: true, prompt: "URL or search", defaultText: "" });
-            list.push({ id: "browser-pin-active", scope: "browser", title: "Pin the browser's current tab to Essentials" });
+            list.push({ id: "browser-pin-active", scope: "browser", title: "Pin current tab to Essentials" });
         }
         if (cell) {
             list.push({ id: "open", scope: "frame", title: "Open frame" });
@@ -1085,10 +1098,12 @@ PanelWindow {
         const tabs = Services.BrowserTabs;
         switch (action.id) {
         case "tab-open": win.activateTab(tab); break;
-        case "tab-pin": if (tab) tabs.pin(tab.tabId); break;
-        case "tab-pin-row": if (tab) { if (tab.kind === "entry") tabs.moveEntry(tab.id, null); else tabs.pinTab(tab.tabId); } break;
+        case "tab-pin": if (tab) followTab("e:" + tabs.pin(tab.tabId)); break;
+        case "tab-pin-row": if (tab) { if (tab.kind === "entry") { tabs.moveEntry(tab.id, null); followTab("p:" + tab.id); } else followTab("p:" + tabs.pinTab(tab.tabId)); } break;
         case "tab-group": if (tab && text.trim()) { if (tab.kind === "entry") tabs.moveEntry(tab.id, text); else tabs.assign(tab.tabId, text); } break;
         case "entry-remove": if (tab) tabs.removeEntry(tab.id); break;
+        case "entry-replace-url": if (tab) tabs.replaceUrl(tab.id); break;
+        case "entry-reset": if (tab) tabs.reset(tab.id); break;
         case "tab-close": if (tab) tabs.close(tab.tabId); break;
         case "group-rename": if (tab) tabs.renameGroup(tab.groupId, text); break;
         case "group-delete": if (tab) tabs.deleteGroup(tab.groupId); break;

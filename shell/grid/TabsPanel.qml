@@ -119,6 +119,15 @@ Item {
         border.width: 2
     }
 
+    // An essential, pinned tab or member whose tab is away from its home
+    // URL (Reset brings it back): a small hollow dot.
+    component Drift: Rectangle {
+        width: 5; height: 5; radius: 2.5
+        color: "transparent"
+        border.width: 1
+        border.color: Theme.oFixer
+    }
+
     // One list entry: hint, icon, title, and on the right what is worth
     // knowing about it ("here", sound, which browser when several run).
     component EntryRow: Item {
@@ -129,6 +138,7 @@ Item {
         property bool audible: false
         property string badge: ""
         property bool closed: false      // a pinned tab or member with no tab: dimmed
+        property bool drifted: false     // its tab went away from its home URL
         property bool strong: false      // a group header
         property int indent: 0
         property int iconW: 16
@@ -168,6 +178,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right; anchors.rightMargin: panel.textX + 2
             spacing: Theme.s4
+            Drift { anchors.verticalCenter: parent.verticalCenter; visible: entry.drifted }
             Glyph {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: entry.audible
@@ -211,6 +222,7 @@ Item {
         badge: modelData.badge || ""
         title: modelData.title
         closed: modelData.open === false
+        drifted: modelData.drifted === true
         Component.onCompleted: panel._entries[modelData.key] = tabRow
         iconItem: Favicon {
             anchors.centerIn: parent
@@ -391,6 +403,7 @@ Item {
                                     color: Theme.oPencil
                                 }
                             }
+                            Drift { visible: tile.modelData.drifted === true; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 4 }
                             // The hint rides the corner so it never covers the icon.
                             Hint { x: -6; y: -6; hint: tile.modelData.hint; selected: tile.selected }
                             Ring { on: tile.selected; out: 3 }
