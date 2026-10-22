@@ -1018,21 +1018,9 @@ PanelWindow {
     }
     // Hyprland wants "address:0x…"; Quickshell reports the hex without the prefix.
     function addr(t) { const a = String(t.address); return "address:" + (a.startsWith("0x") ? a : "0x" + a); }
-    // Quickshell's Hyprland.dispatch does not carry Lua dispatcher calls
-    // reliably on 0.56; hyprctl does.
-    function dispatch(cmd) {
-        const proc = hyprctlRunner.createObject(win, { command: ["hyprctl", "dispatch", cmd] });
-        proc.running = true;
-    }
-    Component {
-        id: hyprctlRunner
-        Process {
-            stdout: StdioCollector { onStreamFinished: if (text.trim() !== "ok" && text.trim() !== "") console.log("hyprctl:", text.trim()) }
-            stderr: StdioCollector { onStreamFinished: if (text.trim() !== "") console.log("hyprctl error:", text.trim()) }
-            onExited: (code) => { if (code !== 0) console.log("hyprctl exit", code, JSON.stringify(command)); destroy(); }
-            stdinEnabled: false
-        }
-    }
+    // Over Quickshell's Hyprland socket, as BrowserTabs does: Lua dispatcher
+    // calls go through, without a hyprctl process per window.
+    function dispatch(cmd) { Hyprland.dispatch(cmd); }
     // Slot mutations go to the environment that binds the slot; a shared
     // frame belongs to an ancestor. Going to a frame stays on the row's leaf,
     // which resolves the same workspace and keeps the leaf's launch command.

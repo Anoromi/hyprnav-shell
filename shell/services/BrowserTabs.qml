@@ -223,7 +223,9 @@ Singleton {
             dispatch("hl.dsp.focus({ window = \"address:" + target.address + "\" })");
         if (then) then();
     }
-    function dispatch(lua) { Quickshell.execDetached(["hyprctl", "dispatch", lua]); }
+    // Over Quickshell's own Hyprland socket: a hyprctl process costs 20-60 ms
+    // before the window comes forward.
+    function dispatch(lua) { Hyprland.dispatch(lua); }
 
     // The browser in front has no host to talk to: hand it its own Ctrl+Tab.
     // Returns whether that was the case.

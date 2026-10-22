@@ -14,8 +14,10 @@ import "tabswitch.js" as TabSwitch
 // press picks the tab before the current one (Shift: the oldest) without
 // drawing or taking the keyboard; a release within `tapTime` switches at
 // once, so a quick Ctrl+Tab costs no frame. Held longer, a compact list shows
-// and takes the keyboard: more Tabs step, Ctrl release, Enter or a click
-// switch, Esc cancels. Nothing is previewed on the way.
+// at once (no fade in) and takes the keyboard: more Tabs step, Ctrl release,
+// Enter or a click switch, Esc cancels. Nothing is previewed on the way.
+// `tapTime` stays under what reads as a delay; a slower tap shows the list
+// for a moment, which is cheaper than a list that lags every held Ctrl+Tab.
 PanelWindow {
     id: win
     required property var modelData
@@ -25,7 +27,7 @@ PanelWindow {
     property bool open: false          // drawn and holding the keyboard
     property var items: []             // merged tabs, frozen for the cycle
     property int selected: 0
-    readonly property int tapTime: 150
+    readonly property int tapTime: 80
     readonly property var selectedItem: items[selected] ?? null
 
     anchors { top: true; bottom: true; left: true; right: true }
@@ -75,8 +77,8 @@ PanelWindow {
     function cancel() { if (phase === "pending" || phase === "open") close(); }
     function close() {
         tap.stop();
-        open = false;
         phase = "closing";
+        open = false;
         finish.interval = Theme.tSnap;
         finish.restart();
     }
@@ -109,7 +111,9 @@ PanelWindow {
         anchors.fill: parent
         opacity: win.open ? 1 : 0
         visible: opacity > 0
-        Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
+        // Fades out only: the list is there on the first frame.
+        // `phase` changes before `open` does, so this is settled first.
+        Behavior on opacity { enabled: win.phase === "closing"; NumberAnimation { duration: Theme.tSnap } }
 
         Rectangle {
             id: sheet
