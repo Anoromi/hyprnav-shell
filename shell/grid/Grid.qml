@@ -95,6 +95,7 @@ PanelWindow {
         const top = Hyprland.activeToplevel;
         origin = { tabId: here, address: top ? addr(top) : "" };
         previewed = false; previewKey = "";
+        Services.BrowserTabs.forgetPreviewFocus();
     }
     function undoPreview() {
         if (!previewed || !origin) return;
@@ -570,6 +571,7 @@ PanelWindow {
                 win.clearHint(); ev.accepted = true; return;
             }
             if (win.zone === "tabs") {
+                perf.key();
                 switch (ev.key) {
                 case Qt.Key_Down: case Qt.Key_J: case Qt.Key_Tab: win.moveTab(1); break;
                 case Qt.Key_Up: case Qt.Key_K: case Qt.Key_Backtab: win.moveTab(-1); break;

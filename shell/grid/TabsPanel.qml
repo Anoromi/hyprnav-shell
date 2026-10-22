@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Effects
 import ".."
+import "tabs.js" as TabsJs
 
 // The grid's browser-tab column: Essentials as tiles with a "New tab" tile
 // after them, the Pinned rows, each group as one header row (its members
@@ -46,6 +47,36 @@ Item {
         else if (bottom > flick.contentY + flick.height - Theme.s8) flick.contentY = Math.min(flick.contentHeight - flick.height, bottom - flick.height + Theme.s8);
     }
     property var _entries: ({})
+
+    // Rows and Essentials live in keyed ListModels that a snapshot edits in
+    // place (see tabs.js keyOps): a delegate is made once per entry and then
+    // only reads its fields from these maps, key -> row or item. Rebuilding
+    // every row on each snapshot cost tens of ms per screen, and a page
+    // loading in a previewed tab sends a stream of them.
+    property var _rows: ({})
+    property var _ess: ({})
+    ListModel { id: rowKeys }
+    ListModel { id: essKeys }
+    // Removes first, while the maps still hold what goes, then the new maps,
+    // then moves and inserts, so no delegate ever reads a missing key.
+    function _sync(list, items, assign, extra) {
+        const from = [];
+        for (let i = 0; i < list.count; i++) from.push(list.get(i).rkey);
+        const ops = TabsJs.keyOps(from, items.map(x => x.key));
+        for (const op of ops) if (op.op === "remove") list.remove(op.at, 1);
+        const map = {};
+        for (const x of items) map[x.key] = x;
+        assign(map);
+        for (const op of ops) {
+            if (op.op === "move") list.move(op.from, op.to, 1);
+            else if (op.op === "insert") list.insert(op.at, extra(map[op.key]));
+        }
+    }
+    onModelChanged: {
+        _sync(essKeys, model.essentials || [], m => panel._ess = m, x => ({ rkey: x.key }));
+        _sync(rowKeys, TabsJs.flatRows(model), m => panel._rows = m, x => ({ rkey: x.key, kind: x.kind }));
+    }
+    Component.onCompleted: modelChanged()
     onSelIndexChanged: Qt.callLater(() => { const sel = panel.model.selectables[panel.selIndex]; if (sel) panel.ensureVisible(panel._entries[sel.key]); })
 
     // A hint, with what has been typed of it in Pencil. Hints the prefix rules
@@ -214,7 +245,7 @@ Item {
     // A tab, pinned tab or group member.
     component TabRow: EntryRow {
         id: tabRow
-        required property var modelData
+        property var modelData: ({})
         selected: modelData.index === panel.selIndex
         hint: modelData.hint
         here: modelData.here === true
@@ -224,6 +255,7 @@ Item {
         closed: modelData.open === false
         drifted: modelData.drifted === true
         Component.onCompleted: panel._entries[modelData.key] = tabRow
+        Component.onDestruction: if (panel._entries[modelData.key] === tabRow) delete panel._entries[modelData.key]
         iconItem: Favicon {
             anchors.centerIn: parent
             icon: tabRow.modelData.icon || ""
@@ -243,7 +275,7 @@ Item {
     // tabs are open of how many, and which way it folds.
     component GroupRow: EntryRow {
         id: groupRow
-        required property var modelData
+        property var modelData: ({})
         selected: modelData.index === panel.selIndex
         hint: modelData.hint
         here: modelData.here === true
@@ -252,6 +284,7 @@ Item {
         iconW: 22
         trailText: modelData.openCount + "/" + modelData.count
         Component.onCompleted: panel._entries[modelData.key] = groupRow
+        Component.onDestruction: if (panel._entries[modelData.key] === groupRow) delete panel._entries[modelData.key]
         iconItem: Repeater {
             model: groupRow.modelData.icons
             delegate: Favicon {
@@ -371,15 +404,17 @@ Item {
                     width: parent.width
                     spacing: panel.tileGap
                     Repeater {
-                        model: panel.model.essentials
+                        model: essKeys
                         delegate: Item {
                             id: tile
-                            required property var modelData
+                            required property string rkey
+                            readonly property var modelData: panel._ess[rkey] ?? ({})
                             readonly property bool selected: modelData.index === panel.selIndex
                             width: panel.tileSize; height: panel.tileSize
                             opacity: panel.ruledOut(modelData.hint) ? 0.3 : 1
                             Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
                             Component.onCompleted: panel._entries[modelData.key] = tile
+                            Component.onDestruction: if (panel._entries[modelData.key] === tile) delete panel._entries[modelData.key]
                             Rectangle {
                                 anchors.fill: parent
                                 radius: Theme.rSheet
@@ -464,41 +499,42 @@ Item {
                 }
             }
 
-            // Pinned, the groups, then the rest.
-            Repeater {
-                model: panel.model.sections
-                delegate: Column {
-                    id: section
-                    required property var modelData
-                    width: column.width
-                    spacing: 2
-                    Text {
-                        visible: section.modelData.title !== ""
-                        leftPadding: panel.textX
-                        bottomPadding: 2
+            // Pinned, the groups, then the rest: one keyed list, so a row
+            // outlives snapshots and only its changed fields update.
+            Column {
+                width: parent.width
+                spacing: 2
+                visible: rowKeys.count > 0
+                Repeater {
+                    model: rowKeys
+                    delegate: Item {
+                        id: slot
+                        required property string rkey
+                        required property string kind
+                        readonly property var row: panel._rows[rkey] ?? null
+                        readonly property var item: row ? row.item : ({})
                         width: column.width
-                        elide: Text.ElideRight
-                        text: section.modelData.title
-                        color: Theme.oFixer
-                        font.family: Theme.casual; font.pixelSize: Theme.fs13; font.weight: Font.Medium
-                    }
-                    Repeater {
-                        model: section.modelData.items
-                        delegate: TabRow {}
-                    }
-                    Repeater {
-                        model: section.modelData.groups
-                        delegate: Column {
-                            id: group
-                            required property var modelData
-                            width: column.width
-                            spacing: 2
-                            GroupRow { modelData: group.modelData.header }
-                            Repeater {
-                                model: group.modelData.items
-                                delegate: TabRow { indent: 12 }
+                        height: (slotLoader.item ? slotLoader.item.height : 0) + (row && row.gap ? Theme.s8 - 2 : 0)
+                        Loader {
+                            id: slotLoader
+                            y: slot.row && slot.row.gap ? Theme.s8 - 2 : 0
+                            width: parent.width
+                            sourceComponent: slot.kind === "title" ? titleC : slot.kind === "group" ? groupC : tabC
+                        }
+                        Component {
+                            id: titleC
+                            Text {
+                                leftPadding: panel.textX
+                                bottomPadding: 2
+                                width: column.width
+                                elide: Text.ElideRight
+                                text: slot.item ? slot.item.title : ""
+                                color: Theme.oFixer
+                                font.family: Theme.casual; font.pixelSize: Theme.fs13; font.weight: Font.Medium
                             }
                         }
+                        Component { id: tabC; TabRow { modelData: slot.item; indent: slot.row ? slot.row.indent : 0 } }
+                        Component { id: groupC; GroupRow { modelData: slot.item } }
                     }
                 }
             }

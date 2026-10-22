@@ -36,6 +36,21 @@ Item {
         console.info("[perf] " + probe.label + " " + probe.tag + " open animation: frames " + (g.length + 1) + ", worst interval " + (g.length ? Math.max(...g) : 0) + " ms");
     } }
     Timer { id: settle; interval: 1500; onTriggered: probe.track("", false) }
+    // A key that moves something: its latency to the next swapped frame,
+    // and a "keys" stretch while keys keep coming (ends 1 s after the last).
+    property real keyAt: 0
+    property var keyLats: []
+    function key() {
+        if (!enabled) return;
+        if (trackTag === "") { track("keys", true); keyLats = []; }
+        if (trackTag === "keys") keyIdle.restart();
+        if (keyAt === 0) keyAt = now();
+    }
+    Timer { id: keyIdle; interval: 1000; onTriggered: {
+        const l = probe.keyLats;
+        if (l.length) console.info("[perf] " + probe.label + " key->frame: n " + l.length + ", mean " + (l.reduce((a, b) => a + b, 0) / l.length).toFixed(1) + " ms, worst " + Math.max(...l) + " ms");
+        probe.track("", false);
+    } }
     function track(t, on) {
         if (!enabled) return;
         if (on) { trackTag = t; gaps = []; lastSwap = 0; lastTick = now(); worstStall = 0; stall.restart(); return; }
@@ -60,6 +75,7 @@ Item {
         target: probe.enabled ? probe.Window.window : null
         function onFrameSwapped() {
             const t = probe.now();
+            if (probe.keyAt > 0) { probe.keyLats.push(t - probe.keyAt); probe.keyAt = 0; }
             if (probe.waiting) {
                 probe.waiting = false;
                 console.info("[perf] " + probe.label + " " + probe.tag + ": first frame " + (t - probe.t0) + " ms at " + t + ", gui stall " + probe.worstStall + " ms");

@@ -210,3 +210,49 @@ function resolve(selectables, prefix) {
     }
     return { exact: null, partial: partial };
 }
+
+// The column's rows below the Essentials, flattened for one keyed list:
+// each section's title (if any), its items, and each group's header with
+// its shown members. `gap` marks the first row of every section after the
+// first, which sits further from the one before; `indent` is a member's.
+// Keys are unique, so the panel can keep a row's delegate across snapshots.
+function flatRows(model) {
+    var out = [], seen = {};
+    function push(key, kind, item, gap, indent) {
+        if (seen[key]) return;
+        seen[key] = true;
+        out.push({ key: key, kind: kind, item: item, gap: gap, indent: indent });
+    }
+    var sections = (model && model.sections) || [];
+    for (var s = 0; s < sections.length; s++) {
+        var sec = sections[s], first = s > 0;
+        if (sec.title) { push("s:" + sec.key, "title", { title: sec.title }, first, 0); first = false; }
+        for (var i = 0; i < sec.items.length; i++) { push(sec.items[i].key, "tab", sec.items[i], first, 0); first = false; }
+        for (var g = 0; g < sec.groups.length; g++) {
+            var gr = sec.groups[g];
+            push(gr.header.key, "group", gr.header, first, 0); first = false;
+            for (var m = 0; m < gr.items.length; m++) push(gr.items[m].key, "tab", gr.items[m], false, 12);
+        }
+    }
+    return out;
+}
+
+// The steps that turn the key list `from` into `to` in place, for a
+// ListModel: removes first (highest index first), then, front to back, a
+// move of a kept key or an insert of a new one where the order differs.
+// Unchanged lists give no steps, so a snapshot that only changes titles
+// keeps every delegate.
+function keyOps(from, to) {
+    var ops = [], want = {}, cur = from.slice();
+    for (var i = 0; i < to.length; i++) want[to[i]] = true;
+    for (var r = cur.length - 1; r >= 0; r--) {
+        if (!want[cur[r]]) { ops.push({ op: "remove", at: r }); cur.splice(r, 1); }
+    }
+    for (var at = 0; at < to.length; at++) {
+        if (cur[at] === to[at]) continue;
+        var j = cur.indexOf(to[at], at + 1);
+        if (j >= 0) { ops.push({ op: "move", from: j, to: at }); cur.splice(j, 1); cur.splice(at, 0, to[at]); }
+        else { ops.push({ op: "insert", at: at, key: to[at] }); cur.splice(at, 0, to[at]); }
+    }
+    return ops;
+}

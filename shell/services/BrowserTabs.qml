@@ -42,7 +42,9 @@ Singleton {
     property var _raw: ({})
     property var _links: ({})          // source id -> its Source object
 
+    readonly property bool perf: Quickshell.env("HNS_PERF") === "1"
     function _rebuild() {
+        const t0 = perf ? Date.now() : 0;
         const sources = Object.values(_raw).filter(s => s.snapshot);
         if (sources.length === 0) { snapshot = null; _stampFront(); return; }
         let merged = Model.merge(model, sources);
@@ -52,7 +54,9 @@ Singleton {
         if (modelLoaded && _opening && Model.claimOpened(model, _opening, merged.tabs)) { _opening = null; changed = true; }
         if (modelLoaded && Model.relink(model, merged.tabs, merged.icons)) changed = true;
         if (changed) { merged = Model.merge(model, sources); _save(); }
+        const t1 = perf ? Date.now() : 0;
         snapshot = merged;
+        if (perf) console.info("[perf] tabs snapshot applied: " + (Date.now() - t1) + " ms (merge " + (t1 - t0) + " ms)");
         _stampFront();
     }
     function _update(info, msg) {
@@ -153,7 +157,7 @@ Singleton {
     }
     Connections {
         target: Hyprland
-        function onActiveToplevelChanged() { root._stampFront(); }
+        function onActiveToplevelChanged() { root._previewFocus = null; root._stampFront(); }
         function onRawEvent(ev) {
             if (ev.name === "openwindow") Hyprland.refreshToplevels();
             else if (ev.name === "windowtitlev2") root._stampFront();
@@ -243,25 +247,39 @@ Singleton {
         if (!item) return;
         const t = item.tabId ? tab(item.tabId) : null;
         if (!t) return;
-        withWindow(t.windowId, () => sendTo(t.source, { type: "activate", tabId: t.rawId }));
+        withWindow(t.windowId, () => sendTo(t.source, { type: "activate", tabId: t.rawId }), true);
     }
     // Undo previews: the tab that was showing, then the window that had the
     // focus before the grid opened.
     function restore(key, address) {
         const t = key ? tab(key) : null;
+        _previewFocus = null;
         if (t) sendTo(t.source, { type: "activate", tabId: t.rawId });
         if (address) dispatch("hl.dsp.focus({ window = \"" + address + "\" })");
     }
 
     // Focus the Hyprland window showing a merged browser window, unless it
     // is already in front, then run `then`.
-    function withWindow(windowKey, then) {
+    //
+    // While the grid holds the keyboard, Hyprland keeps reporting the window
+    // from before as active, so previews remember the window they brought
+    // forward and do not focus it again for every tab: `_previewFocus` is
+    // { address, from } until the active window changes or previews end.
+    property var _previewFocus: null
+    function forgetPreviewFocus() { _previewFocus = null; }
+    function withWindow(windowKey, then, previewing) {
         const w = windowKey ? windowOf(windowKey) : null;
         const src = w ? _raw[w.source] : null;
         const target = src ? Model.resolveWindow(clients(), src, w) : null;
         const active = activeClient();
-        if (target && (!active || active.address !== target.address))
+        const from = active ? active.address : "";
+        const shown = previewing && _previewFocus && target
+            && _previewFocus.address === target.address && _previewFocus.from === from;
+        if (!previewing) _previewFocus = null;
+        if (target && from !== target.address && !shown) {
             dispatch("hl.dsp.focus({ window = \"address:" + target.address + "\" })");
+            if (previewing) _previewFocus = { address: target.address, from: from };
+        }
         if (then) then();
     }
     // Over Quickshell's own Hyprland socket: a hyprctl process costs 20-60 ms
@@ -401,9 +419,14 @@ Singleton {
             id: socketComponent
             Socket {
                 id: transport
+                property string last: ""
                 parser: SplitParser {
                     splitMarker: "\n"
                     onRead: data => {
+                        // A page loading sends snapshots that often repeat
+                        // the last one word for word: nothing to redo.
+                        if (data === transport.last) return;
+                        transport.last = data;
                         let msg = null;
                         try { msg = JSON.parse(data); } catch (e) { return; }
                         if (msg && msg.type === "snapshot" && src.sock === transport) root._update(src.info, msg);

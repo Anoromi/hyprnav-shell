@@ -7,7 +7,7 @@ const path = require("node:path");
 // shell/grid/tabs.js is a QML `.pragma library` script: plain JS once the
 // pragma line is gone.
 const source = fs.readFileSync(path.join(__dirname, "../shell/grid/tabs.js"), "utf8").replace(/^\.pragma library\s*$/m, "");
-const T = new Function(`${source}; return { ALPHABET, hintLabels, build, resolve, searchStart, hostOf, matches, deleteWord };`)();
+const T = new Function(`${source}; return { ALPHABET, hintLabels, build, resolve, searchStart, hostOf, matches, deleteWord, flatRows, keyOps };`)();
 
 test("hint labels stay prefix-free and short labels go first", () => {
   assert.deepEqual(T.hintLabels(3), ["h", "t", "n"], "right hand first");
@@ -223,4 +223,41 @@ test("entries name their browser only while several run", () => {
   const tabs = [{ id: "zen-1/1", windowId: "zen-1/1", index: 0, title: "a", url: "https://a.test/", browser: "zen" }];
   assert.equal(T.build({ groups: [], tabs, browsers: ["zen"] }).sections[0].items[0].badge, "");
   assert.equal(T.build({ groups: [], tabs, browsers: ["zen", "island"] }).sections[0].items[0].badge, "zen");
+});
+
+test("keyOps edits a key list in place into the new one", () => {
+  const apply = (from, ops) => {
+    const a = from.slice();
+    for (const o of ops) {
+      if (o.op === "remove") a.splice(o.at, 1);
+      else if (o.op === "move") a.splice(o.to, 0, a.splice(o.from, 1)[0]);
+      else a.splice(o.at, 0, o.key);
+    }
+    return a;
+  };
+  assert.deepEqual(T.keyOps(["a", "b", "c"], ["a", "b", "c"]), [], "same keys: nothing to do");
+  const cases = [
+    [[], ["a", "b"]], [["a", "b"], []], [["a", "b", "c"], ["c", "a", "b"]],
+    [["a", "b", "c", "d"], ["d", "x", "b", "a"]], [["a", "b", "c"], ["b", "c", "y", "a"]],
+  ];
+  for (const [from, to] of cases) assert.deepEqual(apply(from, T.keyOps(from, to)), to, `${from} -> ${to}`);
+  // Removes come first, so the maps can change in between.
+  const ops = T.keyOps(["a", "b", "c"], ["c", "z"]);
+  assert.deepEqual(ops.map(o => o.op), ["remove", "remove", "insert"]);
+  // A recent tab moving to the top is one move, not a rebuild.
+  assert.deepEqual(T.keyOps(["a", "b", "c", "d"], ["d", "a", "b", "c"]), [{ op: "move", from: 3, to: 0 }]);
+});
+
+test("flatRows lists titles, rows and group members with unique keys", () => {
+  const model = { sections: [
+    { key: "pinned", title: "Pinned", items: [{ key: "p:1" }], groups: [] },
+    { key: "groups", title: "", items: [], groups: [{ header: { key: "g:1" }, items: [{ key: "m:1" }, { key: "m:2" }] }, { header: { key: "g:2" }, items: [] }] },
+    { key: "loose", title: "Tabs", items: [{ key: "t:a" }, { key: "t:a" }], groups: [] },
+  ] };
+  const rows = T.flatRows(model);
+  assert.deepEqual(rows.map(r => r.key), ["s:pinned", "p:1", "g:1", "m:1", "m:2", "g:2", "s:loose", "t:a"]);
+  assert.deepEqual(rows.map(r => r.kind), ["title", "tab", "group", "tab", "tab", "group", "title", "tab"]);
+  assert.deepEqual(rows.filter(r => r.gap).map(r => r.key), ["g:1", "s:loose"], "a gap opens every section after the first");
+  assert.deepEqual(rows.filter(r => r.indent).map(r => r.key), ["m:1", "m:2"]);
+  assert.deepEqual(T.flatRows(T.build(null)), []);
 });
