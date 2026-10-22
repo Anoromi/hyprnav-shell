@@ -8,11 +8,17 @@
 // window ids are only unique inside it, so merged ones are "<source>/<id>"
 // strings and keep the browser's own as `rawId`.
 //
-// The model: { essentials: [{ id, title, url, icon, browser, tabKey }],
+// The model: { essentials: [{ id, title, url, icon, browser, tabKey, tabUrl }],
 //              groups: [{ id, name, members: [{ browser, url, tabKey }] }],
 //              nextId, legacyImported }
 // Tab keys die with the browser; URLs survive, so members and essentials
 // find their tab again by browser and URL after a restart.
+//
+// An essential is the shell's, Arc style: its home `url`, title and icon
+// stay until it is unpinned, whether or not a tab shows it. `tabKey` is the
+// tab it opened (null: none open), `tabUrl` where that tab was last, for
+// finding it again after a restart. It only takes a tab it opened itself or
+// had before the restart; other tabs on its site stay loose tabs.
 
 // Hyprland classes per browser, for when its window's pid is not the one
 // that started the host.
@@ -37,7 +43,8 @@ function normalize(stored) {
         .filter(function (e) { return e && typeof e.url === "string"; })
         .map(function (e) {
             return { id: String(e.id), title: String(e.title || e.url), url: e.url, icon: str(e.icon),
-                     browser: str(e.browser), tabKey: typeof e.tabKey === "string" ? e.tabKey : null };
+                     browser: str(e.browser), tabKey: typeof e.tabKey === "string" ? e.tabKey : null,
+                     tabUrl: str(e.tabUrl) };
         });
     model.groups = (Array.isArray(stored.groups) ? stored.groups : [])
         .filter(function (g) { return g && typeof g.name === "string"; })
@@ -58,13 +65,13 @@ function newId(model, prefix) {
 
 // The Island Productivity extension kept Essentials and groups itself; its
 // successor hands them over once. Their tab ids are the old browser's, so
-// everything relinks by URL.
+// everything relinks by URL: a key no tab has stands for a lost tab.
 function importLegacy(model, legacy, browser) {
     var old = legacy && typeof legacy === "object" ? legacy : {};
     (Array.isArray(old.essentials) ? old.essentials : []).forEach(function (e) {
         if (!e || typeof e.url !== "string") return;
         model.essentials.push({ id: newId(model, "e"), title: String(e.title || e.url), url: e.url,
-                                icon: str(e.icon), browser: browser, tabKey: null });
+                                icon: str(e.icon), browser: browser, tabKey: "legacy", tabUrl: "" });
     });
     (Array.isArray(old.groups) ? old.groups : []).forEach(function (g) {
         if (!g || typeof g.name !== "string") return;
@@ -76,36 +83,40 @@ function importLegacy(model, legacy, browser) {
     model.legacyImported = true;
 }
 
-function hostOf(url) {
-    var m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i.exec(url || "");
-    return m ? m[1] : "";
-}
-
-// An essential owns at most one tab, in the browser it was pinned from: the
-// one it opened while that tab is still on the essential's site, otherwise
-// an unclaimed tab on that site.
-function essentialTab(essential, tabs, claimed) {
-    var host = hostOf(essential.url);
-    if (!host) return null;
-    for (var i = 0; i < tabs.length; i++) {
-        if (tabs[i].id === essential.tabKey && hostOf(tabs[i].url) === host) return tabs[i];
-    }
-    for (var j = 0; j < tabs.length; j++) {
-        var t = tabs[j];
-        if (!claimed[t.id] && t.browser === essential.browser && hostOf(t.url) === host) return t;
-    }
-    return null;
+// A page without its query and fragment, for matching a tab to a URL.
+function pageOf(url) {
+    return (url || "").replace(/[?#].*$/, "").replace(/\/+$/, "");
 }
 
 // Re-attach members whose tab is gone to an unclaimed tab with the same
-// browser and URL, and follow essentials to their adopted tab. Returns
+// browser and URL, and essentials whose tab went with its window or browser
+// to one on the page their tab was on, or on their home page. Live tabs
+// keep their essential however far they navigate; the essential notes where
+// the tab is and the site's icon, so it still shows with no tab. Returns
 // whether anything changed.
-function relink(model, tabs) {
+function relink(model, tabs, icons) {
     var changed = false;
     var live = {}, claimed = {};
-    for (var i = 0; i < tabs.length; i++) live[tabs[i].id] = true;
+    var known = icons || {};
+    for (var i = 0; i < tabs.length; i++) live[tabs[i].id] = tabs[i];
+    model.essentials.forEach(function (e) { if (e.tabKey !== null && live[e.tabKey]) claimed[e.tabKey] = true; });
     model.groups.forEach(function (g) {
         g.members.forEach(function (m) { if (m.tabKey !== null && live[m.tabKey]) claimed[m.tabKey] = true; });
+    });
+    model.essentials.forEach(function (e) {
+        if (e.tabKey === null) return;
+        var tab = live[e.tabKey] || null;
+        for (var k = 0; !tab && k < tabs.length; k++) {
+            var t = tabs[k];
+            if (!claimed[t.id] && t.browser === e.browser && t.url !== ""
+                && (pageOf(t.url) === pageOf(e.tabUrl) || pageOf(t.url) === pageOf(e.url))) tab = t;
+        }
+        if (!tab) return;
+        claimed[tab.id] = true;
+        if (e.tabKey !== tab.id) { e.tabKey = tab.id; changed = true; }
+        if (tab.url && e.tabUrl !== tab.url) { e.tabUrl = tab.url; changed = true; }
+        var icon = known[tab.icon];
+        if (icon && /^(data:|https?:)/.test(icon) && e.icon !== icon) { e.icon = icon; changed = true; }
     });
     model.groups.forEach(function (g) {
         g.members.forEach(function (m) {
@@ -119,16 +130,27 @@ function relink(model, tabs) {
             }
         });
     });
-    model.essentials.forEach(function (e) {
-        var tab = essentialTab(e, tabs, claimed);
-        if (tab) {
-            claimed[tab.id] = true;
-            if (e.tabKey !== tab.id) { e.tabKey = tab.id; changed = true; }
-        }
-        // A missing tab keeps its key: the next one on the site is adopted
-        // above, and nothing else can take a dead key.
-    });
     return changed;
+}
+
+// The tab an essential asked its browser for: the first new one in that
+// source. `opening`: { essential, source, known: { <tab key>: true } }, the
+// tabs the source had when asked. Returns whether it was found.
+function claimOpened(model, opening, tabs) {
+    var e = null;
+    model.essentials.forEach(function (x) { if (x.id === opening.essential) e = x; });
+    if (!e) return false;
+    for (var i = 0; i < tabs.length; i++) {
+        var t = tabs[i];
+        if (t.source === opening.source && !opening.known[t.id]) {
+            model.essentials.forEach(function (x) { if (x.tabKey === t.id) x.tabKey = null; });
+            removeMember(model, t.id);
+            e.tabKey = t.id;
+            e.tabUrl = t.url;
+            return true;
+        }
+    }
+    return false;
 }
 
 function removeMember(model, tabKey) {
@@ -140,8 +162,9 @@ function removeMember(model, tabKey) {
     return changed;
 }
 
-// Tabs closed one by one leave their group; tabs that went with their
-// window, or with the whole browser, stay and relink when they come back.
+// Tabs closed one by one leave their group and their essential, which stays
+// pinned with no tab; tabs that went with their window, or with the whole
+// browser, stay and relink when they come back.
 // `before` and `after` are one source's own snapshots.
 function dropClosed(model, sourceId, before, after) {
     if (!before) return false;
@@ -150,7 +173,10 @@ function dropClosed(model, sourceId, before, after) {
     (after.windows || []).forEach(function (w) { windows[w.id] = true; });
     var changed = false;
     (before.tabs || []).forEach(function (t) {
-        if (!live[t.id] && windows[t.windowId] && removeMember(model, sourceId + "/" + t.id)) changed = true;
+        if (live[t.id] || !windows[t.windowId]) return;
+        var key = sourceId + "/" + t.id;
+        if (removeMember(model, key)) changed = true;
+        model.essentials.forEach(function (e) { if (e.tabKey === key) { e.tabKey = null; changed = true; } });
     });
     return changed;
 }
@@ -159,7 +185,7 @@ function pin(model, tab) {
     if (model.essentials.some(function (e) { return e.tabKey === tab.id; })) return;
     removeMember(model, tab.id);
     model.essentials.push({ id: newId(model, "e"), title: tab.title || tab.url, url: tab.url,
-                            icon: tab.icon || "", browser: tab.browser, tabKey: tab.id });
+                            icon: tab.icon || "", browser: tab.browser, tabKey: tab.id, tabUrl: tab.url });
 }
 
 function assign(model, tab, name) {

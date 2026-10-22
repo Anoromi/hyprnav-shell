@@ -336,7 +336,7 @@ Item {
                                 Favicon {
                                     anchors.centerIn: parent
                                     size: 20
-                                    opacity: tile.modelData.open ? 1 : 0.7
+                                    opacity: tile.modelData.open ? 1 : 0.45
                                     icon: tile.modelData.icon || ""
                                     fallback: tile.modelData.title
                                 }

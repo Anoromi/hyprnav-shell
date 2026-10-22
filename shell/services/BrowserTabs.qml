@@ -48,7 +48,10 @@ Singleton {
         let merged = Model.merge(model, sources);
         // Relinking needs the model loaded, or it would claim tabs for an
         // empty model and save that over the real one.
-        if (modelLoaded && Model.relink(model, merged.tabs)) { merged = Model.merge(model, sources); _save(); }
+        let changed = false;
+        if (modelLoaded && _opening && Model.claimOpened(model, _opening, merged.tabs)) { _opening = null; changed = true; }
+        if (modelLoaded && Model.relink(model, merged.tabs, merged.icons)) changed = true;
+        if (changed) { merged = Model.merge(model, sources); _save(); }
         snapshot = merged;
         _stampFront();
     }
@@ -172,26 +175,37 @@ Singleton {
         stamp(t.id);
         withWindow(t.windowId, () => sendTo(t.source, { type: "activate", tabId: t.rawId }));
     }
-    // An essential opens in the browser it was pinned from, in its own tab
-    // when it has one.
+    // An essential shows its own tab when it has one, else opens its home
+    // page in the browser it was pinned from (or the one in front) and takes
+    // the new tab: the first one that source shows next (see claimOpened).
+    property var _opening: null        // { essential, source, known }
+    Timer { id: openingTimer; interval: 10000; onTriggered: root._opening = null }
     function openEssential(id) {
         const e = model.essentials.find(x => x.id === id);
         if (!e) return;
         const live = (snapshot?.essentials ?? []).find(x => x.id === id);
         if (live && live.tabId) { activate(live.tabId); return; }
-        create(e.url, e.browser);
+        if (_opening && _opening.essential === id) return;
+        const source = create(e.url, e.browser);
+        if (!source) return;
+        const known = {};
+        for (const t of snapshot.tabs) if (t.source === source) known[t.id] = true;
+        _opening = { essential: id, source: source, known: known };
+        openingTimer.restart();
     }
-    // A new tab in `browser` (or the one in front) for typed text.
+    // A new tab in `browser` (or the one in front) for typed text. Returns
+    // the source asked, or null with no browser to ask.
     function create(text, browser) {
         const front = frontTab();
         const source = (browser ? sourceOf(browser) : null) ?? front?.source ?? Object.keys(_raw).find(id => _raw[id].snapshot) ?? null;
-        if (!source) return;
+        if (!source) return null;
         const target = Model.interpretInput(text);
         const command = target.kind === "search" ? { type: "create", search: target.text }
             : { type: "create", url: target.kind === "url" ? target.url : "" };
         const w = (snapshot?.windows ?? []).filter(x => x.source === source);
         const win = (front && front.source === source ? windowOf(front.windowId) : null) ?? w.find(x => x.focused) ?? w[0] ?? null;
         withWindow(win ? win.id : null, () => sendTo(source, command));
+        return source;
     }
     function close(key) { const t = tab(key); if (t) sendTo(t.source, { type: "close", tabId: t.rawId }); }
 

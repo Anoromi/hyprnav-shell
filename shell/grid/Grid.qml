@@ -966,6 +966,7 @@ PanelWindow {
             list.push({ id: "tab-open", scope: "essential", title: "Open essential" });
             list.push({ id: "essential-rename", scope: "essential", title: "Rename essential", needsText: true, prompt: "Name", defaultText: tab.title });
             list.push({ id: "essential-unpin", scope: "essential", title: "Remove from Essentials" });
+            if (tab.open) list.push({ id: "tab-close", scope: "essential", title: "Close its tab (stays in Essentials)" });
         }
         if (win.tabsShown) {
             list.push({ id: "browser-new", scope: "browser", title: "Open in new tab…", needsText: true, prompt: "URL or search", defaultText: "" });

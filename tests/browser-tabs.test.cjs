@@ -9,7 +9,7 @@ function load(file, names) {
   const source = fs.readFileSync(path.join(__dirname, "../shell", file), "utf8").replace(/^\.pragma library\s*$/m, "");
   return new Function(`${source}; return { ${names.join(", ")} };`)();
 }
-const M = load("tabs/model.js", ["CLASSES", "emptyModel", "normalize", "importLegacy", "essentialTab", "relink", "removeMember",
+const M = load("tabs/model.js", ["CLASSES", "emptyModel", "normalize", "importLegacy", "relink", "claimOpened", "removeMember",
   "dropClosed", "pin", "assign", "merge", "resolveWindow", "windowForClient", "interpretInput"]);
 const R = load("tabs/mru.js", ["recency", "order", "stamp"]);
 const S = load("tabswitch/tabswitch.js", ["start", "step"]);
@@ -35,7 +35,7 @@ test("merge keys tabs and windows by source and keeps the raw ids", () => {
 test("essentials and groups claim tabs in their own browser and relink by URL", () => {
   const model = M.normalize({
     nextId: 5,
-    essentials: [{ id: "e1", title: "Linear", url: "https://linear.app/", browser: "zen", tabKey: "zen-9/1" }],
+    essentials: [{ id: "e1", title: "Linear", url: "https://linear.app/", browser: "zen", tabKey: "zen-9/1", tabUrl: "https://linear.app/team?x=1" }],
     groups: [{ id: "g1", name: "Research", members: [{ browser: "island", url: "https://arxiv.org/x", tabKey: "island-9/4" }] }],
   });
   // After a restart: new sources, new ids. The Island tab on linear.app is
@@ -48,6 +48,7 @@ test("essentials and groups claim tabs in their own browser and relink by URL", 
   assert.equal(M.relink(model, tabs), true);
   assert.equal(model.essentials[0].tabKey, "zen-2/3");
   assert.equal(model.groups[0].members[0].tabKey, "island-1/8");
+  assert.equal(model.essentials[0].tabUrl, "https://linear.app/team");
   assert.equal(M.relink(model, tabs), false);
   const merged = M.merge(model, sources);
   assert.deepEqual(merged.tabs.map((t) => [t.id, t.essential, t.group]),
@@ -70,6 +71,51 @@ test("pinning and assigning move a tab between essentials and groups", () => {
   assert.equal(model.essentials[0].tabKey, null, "assigning takes the tab from its essential");
 });
 
+test("an essential outlives its tab and opens a new one, which it then keeps", () => {
+  const model = M.normalize({ essentials: [{ id: "e1", title: "Mail", url: "https://mail.test/", icon: "https://mail.test", browser: "island", tabKey: "s/1", tabUrl: "https://mail.test/" }] });
+  const icons = { "https://mail.test": "data:image/png;base64,AA" };
+  // The tab navigates within the site: still the essential's, and its icon is kept.
+  const moved = [{ ...tab(1, "https://mail.test/inbox/42"), id: "s/1", source: "s", browser: "island", icon: "https://mail.test" }];
+  assert.equal(M.relink(model, moved, icons), true);
+  assert.deepEqual([model.essentials[0].tabKey, model.essentials[0].tabUrl, model.essentials[0].icon], ["s/1", "https://mail.test/inbox/42", icons["https://mail.test"]]);
+  // Closed on its own: the essential stays, with no tab.
+  const before = { windows: [{ id: 1 }], tabs: [tab(1, "https://mail.test/inbox/42"), tab(2, "https://x.test/")] };
+  const after = { windows: [{ id: 1 }], tabs: [tab(2, "https://x.test/")] };
+  assert.equal(M.dropClosed(model, "s", before, after), true);
+  assert.equal(model.essentials.length, 1);
+  assert.equal(model.essentials[0].tabKey, null);
+  const merged = M.merge(model, [{ id: "s", browser: "island", browserPid: 1, snapshot: { ...after, icons: {} } }]);
+  assert.equal(merged.essentials[0].tabId, null);
+  assert.equal(merged.essentials[0].icon, icons["https://mail.test"], "the saved icon shows with no tab");
+  // Another tab on its site stays loose.
+  const other = [{ ...tab(3, "https://mail.test/"), id: "s/3", source: "s", browser: "island" }];
+  assert.equal(M.relink(model, other, {}), false);
+  assert.equal(model.essentials[0].tabKey, null);
+  // Opening it takes the first new tab of the source it asked.
+  const opening = { essential: "e1", source: "s", known: { "s/3": true } };
+  assert.equal(M.claimOpened(model, opening, other), false);
+  const opened = other.concat([{ ...tab(4, ""), id: "s/4", source: "s", browser: "island" }]);
+  assert.equal(M.claimOpened(model, opening, opened), true);
+  assert.equal(model.essentials[0].tabKey, "s/4");
+  const shown = M.merge(model, [{ id: "s", browser: "island", browserPid: 1, snapshot: { windows: [{ id: 1 }], tabs: [tab(3, "https://mail.test/"), tab(4, "https://mail.test/")], icons: {} } }]);
+  assert.deepEqual(shown.tabs.map((t) => [t.id, t.essential]), [["s/3", null], ["s/4", "e1"]], "its tab leaves the loose tabs");
+});
+
+test("after a browser restart an essential finds its tab by URL, and stays when there is none", () => {
+  const model = M.normalize({ essentials: [
+    { id: "e1", title: "Mail", url: "https://mail.test/", browser: "island", tabKey: "old/1", tabUrl: "https://mail.test/inbox/42" },
+    { id: "e2", title: "Docs", url: "https://docs.test/", browser: "island", tabKey: "old/2", tabUrl: "https://docs.test/a" },
+  ] });
+  const tabs = [
+    { ...tab(7, "https://mail.test/inbox/42#top"), id: "new/7", source: "new", browser: "island" },
+    { ...tab(8, "https://docs.test/b"), id: "new/8", source: "new", browser: "island" },
+  ];
+  assert.equal(M.relink(model, tabs, {}), true);
+  assert.equal(model.essentials[0].tabKey, "new/7");
+  assert.equal(model.essentials[1].tabKey, "old/2", "a tab elsewhere on the site is not adopted");
+  assert.equal(M.merge(model, []).essentials[1].tabId, null);
+});
+
 test("a closed tab leaves its group, a closed window keeps it", () => {
   const model = M.normalize({ groups: [{ id: "g1", name: "g", members: [
     { browser: "island", url: "https://a.test/", tabKey: "s/1" },
@@ -89,7 +135,7 @@ test("the old extension's model imports once, for the browser it came from", () 
     groups: [{ id: "g1", name: "Work", members: [{ tabId: 9, url: "https://a.test/" }, { tabId: 10, url: "" }] }],
   }, "island");
   assert.equal(model.legacyImported, true);
-  assert.deepEqual(model.essentials.map((e) => [e.title, e.browser, e.tabKey]), [["Gmail", "island", null]]);
+  assert.deepEqual(model.essentials.map((e) => [e.title, e.browser, e.tabKey]), [["Gmail", "island", "legacy"]]);
   assert.deepEqual(model.groups[0].members, [{ browser: "island", url: "https://a.test/", tabKey: null }]);
   assert.deepEqual(M.normalize(JSON.parse(JSON.stringify(model))), model, "survives a save");
 });
