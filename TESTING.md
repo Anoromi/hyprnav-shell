@@ -780,3 +780,26 @@ a state file with old-format groups (members `{ browser, url, tabKey }`).
 | Palette | loose tab: Pin tab moves it to Pinned; member: Remove from group, Close its tab (stays in the group); header: Collapse, Rename, Delete |
 | Browser restart (new source id) | open entries relink by URL; a member closed alone does not take the reopened tab |
 | Ctrl+Tab (`ipc call tabs next`) | unchanged, open tabs only |
+
+## Capslock+/ searches tabs (2026-10-22)
+
+Capslock+/ (keyd F14, `XF86Launch5`, global `hyprnav-shell:grid-tabs`, IPC
+`grid tabs`) opens the grid on the tab column; with the grid open it starts
+the tab search as `/` does, also from the workspaces (Super+A); while
+searching it closes the grid. `grid state` reports zone, search and query.
+
+Lab (`scripts/lab.py up`, which binds `XF86Launch5` as live),
+`scripts/fake-browser-tabs.py --pid 4242`, keys from `hns-lab-keys`.
+
+| Case | Result |
+|---|---|
+| Two taps 150 ms apart | open, searching, empty query, "Search tabs" field shown, selection on the "here" row |
+| Typing `ab` after | goes into the query |
+| Third tap | closes |
+| Two taps 0.8 s apart | open on the column, then searching |
+| Esc, Esc while searching | search ends, then the grid closes |
+| Super+A, then the tap | from the workspaces into the column, searching; next tap closes |
+| 5 taps 400 ms apart, then held 1 s (`HNS_PERF=1`) | 6 `shortcut grid-tabs` lines: one fire per press, none on hold |
+
+Hyprland fires the global once per press, so the double-fire guard is down
+from 300 ms to 80 ms, under any deliberate double tap.

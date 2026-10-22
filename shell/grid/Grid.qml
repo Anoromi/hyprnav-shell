@@ -292,11 +292,13 @@ PanelWindow {
     }
     // Open with the selection in the tab column, on the current tab. show()
     // may present only once the snapshot arrives, so that happens in present().
-    // A second press closes from the column, as grid-toggle does. A press
-    // right after the last one is a bounce or a repeat and does nothing, so
-    // the grid never opens and closes, or closes and reopens, in a blink.
+    // With the grid open a second press searches the tabs, as / does (from
+    // the workspaces too), and a third closes. The key comes as a global
+    // shortcut with Ctrl held, so the search field never sees it. A press
+    // within repeatGuard of the last is a double fire and does nothing; a
+    // quick deliberate double tap is slower than that.
     property bool tabsOnOpen: false
-    readonly property int repeatGuard: 300
+    readonly property int repeatGuard: 80
     property double tabsPressedAt: 0
     function showTabs() {
         const now = Date.now();
@@ -304,7 +306,7 @@ PanelWindow {
         tabsPressedAt = now;
         if (waitingOpen) { tabsOnOpen = true; return; }
         if (phase === "open") {
-            if (zone === "tabs" || !tabsShown) close(); else focusTabs();
+            if (searching || !tabsShown) close(); else startSearch();
             return;
         }
         tabsOnOpen = true;

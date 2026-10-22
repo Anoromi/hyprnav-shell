@@ -190,6 +190,8 @@ hl.animation({{ leaf = "fade", enabled = true, speed = 7, bezier = "default" }})
 hl.bind("SUPER + Tab", hl.dsp.global("hyprnav-shell:switcher-open"))
 hl.bind("ALT + SHIFT + Tab", hl.dsp.global("hyprnav-shell:switcher-back"))
 hl.bind("SUPER + A", hl.dsp.global("hyprnav-shell:grid-toggle"))
+-- keyd sends F14 (XF86Launch5) for Capslock + Dvorak "/".
+hl.bind("XF86Launch5", hl.dsp.global("hyprnav-shell:grid-tabs"))
 for _, key in ipairs({{ "Super_L", "Super_R" }}) do
     hl.bind(key, hl.dsp.global("hyprnav-shell:switcher-commit"), {{ release = true, non_consuming = true, transparent = true }})
     hl.bind("SUPER + " .. key, hl.dsp.global("hyprnav-shell:switcher-commit"), {{ release = true, non_consuming = true, transparent = true }})

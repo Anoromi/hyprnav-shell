@@ -245,7 +245,7 @@ ShellRoot {
         function windows(ws: int): string { const g = root.gridWin(); if (!g) return "[]"; return JSON.stringify(g.windowsOn(ws).map(t => ({ address: String(t.address), ws: t.workspace ? t.workspace.id : null, title: t.title }))); }
         function toplevels(): string { return JSON.stringify(Hyprland.toplevels.values.map(t => ({ address: String(t.address), ws: t.workspace ? t.workspace.id : null, title: t.title }))); }
         function dispatch(cmd: string): void { root.gridWin()?.dispatch(cmd); }
-        function state(): string { const g = root.gridWin(); return g ? JSON.stringify({ phase: g.phase, row: g.selRow, col: g.selCol }) : "none"; }
+        function state(): string { const g = root.gridWin(); return g ? JSON.stringify({ phase: g.phase, row: g.selRow, col: g.selCol, zone: g.zone, searching: g.searching, query: g.tabQuery, tab: g.selectedTab?.key ?? null }) : "none"; }
     }
 
     IpcHandler {
