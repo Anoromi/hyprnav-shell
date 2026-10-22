@@ -1,4 +1,4 @@
-{ lib, runCommand, makeWrapper, quickshell, glib }:
+{ lib, runCommand, makeWrapper, quickshell, glib, wl-clipboard }:
 
 runCommand "hyprnav-shell" {
   nativeBuildInputs = [ makeWrapper ];
@@ -7,7 +7,7 @@ runCommand "hyprnav-shell" {
   cp -r ${./shell} "$out/shell"
   makeWrapper ${quickshell}/bin/qs "$out/bin/hyprnav-shell" \
     --unset HNS_SCREEN \
-    --suffix PATH : ${lib.makeBinPath [ glib ]} \
-    --set-default HNS_COMPONENTS switcher,grid,badges,caption \
+    --suffix PATH : ${lib.makeBinPath [ glib wl-clipboard ]} \
+    --set-default HNS_COMPONENTS switcher,grid,tabswitch,badges,caption \
     --add-flags "-p $out/shell"
 ''

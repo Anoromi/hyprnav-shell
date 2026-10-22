@@ -19,6 +19,51 @@ for _, key in ipairs({ "Super_L", "Super_R" }) do
     hl.bind("SUPER + " .. key, hl.dsp.global("hyprnav-shell:switcher-commit"), { release = true, non_consuming = true, transparent = true })
 end
 
+-- Ctrl+Tab across every browser's tabs, most recently used first (needs a
+-- browser-tabs host per browser, see services/BrowserTabs.qml). The keys go
+-- to the shell only while a browser is in front, or while a cycle runs and
+-- the shell's list holds the keyboard; other windows get Ctrl+Tab as usual.
+-- The Ctrl release commits.
+local browserClasses = {
+    ["island-browser"] = true, ["zen-beta"] = true, zen = true,
+    chromium = true, ["chromium-browser"] = true,
+}
+local tabsCycling = false
+local function frontBrowser()
+    local window = hl.get_active_window()
+    return window ~= nil and browserClasses[window.class] == true, window
+end
+local function tabsStep(name, mods)
+    return function()
+        local isBrowser, window = frontBrowser()
+        if tabsCycling or isBrowser then
+            tabsCycling = true
+            hl.dispatch(hl.dsp.global("hyprnav-shell:" .. name))
+        elseif window ~= nil then
+            hl.dispatch(hl.dsp.send_shortcut({ mods = mods, key = "Tab", window = window }))
+        end
+    end
+end
+hl.bind("CTRL + Tab", tabsStep("tabs-next", "CTRL"))
+hl.bind("CTRL + SHIFT + Tab", tabsStep("tabs-prev", "CTRL SHIFT"))
+local function tabsCommit()
+    if not tabsCycling then
+        return
+    end
+    tabsCycling = false
+    hl.dispatch(hl.dsp.global("hyprnav-shell:tabs-commit"))
+end
+for _, key in ipairs({ "Control_L", "Control_R" }) do
+    hl.bind(key, tabsCommit, { release = true, non_consuming = true, transparent = true })
+    hl.bind("CTRL + " .. key, tabsCommit, { release = true, non_consuming = true, transparent = true })
+end
+-- Copy the front browser tab's address; the window still gets the key.
+hl.bind("CTRL + SHIFT + C", function()
+    if frontBrowser() then
+        hl.dispatch(hl.dsp.global("hyprnav-shell:tabs-copy-url"))
+    end
+end, { non_consuming = true })
+
 -- No compositor fade on the shell's layers: the shell animates its own, and
 -- the default fade held surfaces that map (captions, badges, popups) at part
 -- opacity for 200-350 ms. Rule regexes must match the whole namespace.

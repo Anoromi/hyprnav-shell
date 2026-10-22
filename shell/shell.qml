@@ -6,6 +6,7 @@ import Quickshell.Hyprland
 import "services" as Services
 import "switcher"
 import "grid"
+import "tabswitch"
 import "bar"
 import "notifications"
 import Quickshell.Services.UPower
@@ -16,7 +17,7 @@ ShellRoot {
     readonly property var screens: Quickshell.screens.filter(s => root.targetScreen === "" || s.name === root.targetScreen)
     // An unset value keeps the full lab shell. The packaged live launcher sets
     // only the surfaces that can coexist with DMS. Names: switcher, grid,
-    // badges, caption, bar, qs, popups, center, osd. The older names
+    // tabswitch, badges, caption, bar, qs, popups, center, osd. The older names
     // `quick-settings` (= qs) and `notifications` (= popups,center) still work.
     readonly property string components: Quickshell.env("HNS_COMPONENTS") || ""
     readonly property var aliases: ({ "quick-settings": ["qs"], "notifications": ["popups", "center"] })
@@ -70,6 +71,12 @@ ShellRoot {
         Grid {}
     }
     function gridWin() { return overlayWin(grids); }
+    Variants {
+        id: tabswitchers
+        model: root.hasComponent("tabswitch") ? root.screens : []
+        TabSwitcher {}
+    }
+    function tabswitchWin() { return tabswitchers.instances.find(w => w.phase === "pending" || w.phase === "open") ?? focused(tabswitchers); }
     Variants {
         id: quick
         model: root.hasComponent("qs") ? root.screens : []
@@ -146,6 +153,38 @@ ShellRoot {
         description: "Open or close the environment grid"
         onPressed: { root.perf("shortcut grid-toggle"); root.gridWin()?.toggle(); }
     }
+    GlobalShortcut {
+        appid: "hyprnav-shell"; name: "grid-tabs"
+        description: "Open the environment grid with the browser tab column selected"
+        onPressed: { root.perf("shortcut grid-tabs"); root.gridWin()?.showTabs(); }
+    }
+    // Ctrl+Tab across browser tabs (see tabswitch/TabSwitcher.qml). Hyprland
+    // dispatches these from Lua binds, only while a browser window is in
+    // front or a cycle runs; the commit goes with the Ctrl release. A global
+    // dispatched from a release bind arrives as a release only, one from a
+    // press bind as a press and a release, so steps act on the press and the
+    // commit on either (a commit is idempotent).
+    GlobalShortcut {
+        appid: "hyprnav-shell"; name: "tabs-next"
+        description: "Step to the next browser tab in most-recently-used order"
+        onPressed: root.tabswitchWin()?.show(false)
+    }
+    GlobalShortcut {
+        appid: "hyprnav-shell"; name: "tabs-prev"
+        description: "Step back through browser tabs in most-recently-used order"
+        onPressed: root.tabswitchWin()?.show(true)
+    }
+    GlobalShortcut {
+        appid: "hyprnav-shell"; name: "tabs-commit"
+        description: "Switch to the selected browser tab (bind to the Ctrl release)"
+        onPressed: root.tabswitchWin()?.commit()
+        onReleased: root.tabswitchWin()?.commit()
+    }
+    GlobalShortcut {
+        appid: "hyprnav-shell"; name: "tabs-copy-url"
+        description: "Copy the web address of the browser tab in front"
+        onPressed: Services.BrowserTabs.copyUrl()
+    }
 
     IpcHandler {
         target: "caption"
@@ -196,6 +235,7 @@ ShellRoot {
         target: "grid"
         function open(): void { root.perf("ipc grid.open"); root.gridWin()?.show(); }
         function toggle(): void { root.perf("ipc grid.toggle"); root.gridWin()?.toggle(); }
+        function tabs(): void { root.perf("ipc grid.tabs"); root.gridWin()?.showTabs(); }
         function close(): void { root.gridWin()?.close(); }
         function activate(): void { root.gridWin()?.activate(); }
         function lock(): void { root.gridWin()?.toggleLock(); }
@@ -206,6 +246,25 @@ ShellRoot {
         function toplevels(): string { return JSON.stringify(Hyprland.toplevels.values.map(t => ({ address: String(t.address), ws: t.workspace ? t.workspace.id : null, title: t.title }))); }
         function dispatch(cmd: string): void { root.gridWin()?.dispatch(cmd); }
         function state(): string { const g = root.gridWin(); return g ? JSON.stringify({ phase: g.phase, row: g.selRow, col: g.selCol }) : "none"; }
+    }
+
+    IpcHandler {
+        target: "tabs"
+        function next(): void { root.tabswitchWin()?.show(false); }
+        function prev(): void { root.tabswitchWin()?.show(true); }
+        function commit(): void { root.tabswitchWin()?.commit(); }
+        function cancel(): void { root.tabswitchWin()?.cancel(); }
+        function copyUrl(): void { Services.BrowserTabs.copyUrl(); }
+        function state(): string {
+            const w = root.tabswitchWin();
+            const t = Services.BrowserTabs;
+            return JSON.stringify({
+                phase: w ? w.phase : "none", selected: w ? w.selected : -1,
+                items: w ? w.items.map(i => i.id) : [],
+                sources: Object.keys(t._raw), front: t.frontTab()?.id ?? null,
+                mru: t.mruTabs().map(i => i.id)
+            });
+        }
     }
 
     IpcHandler {

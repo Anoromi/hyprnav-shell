@@ -722,3 +722,37 @@ process kept running, and `hyprctl monitors` still answered. `lab.py down`
 removed the scope, including Quickshell, which is not in `pids.json` and
 previously survived `down`.
 
+
+## Browser tabs across browsers and Ctrl+Tab (2026-10-22)
+
+Every browser's tab host now announces itself with a descriptor in
+`$HNS_TABS_DIR` (`<browser>-<pid>.json` next to its socket), and the shell
+merges all of them; Essentials and groups moved from the Island extension
+into the shell (`tabs/model.js`, saved in `$HNS_TABS_STATE`). Ctrl+Tab is
+the new `tabswitch` component.
+
+Lab (`scripts/lab.py up`), with the Ctrl+Tab binds from
+`scripts/bindings.example.lua` loaded through `hyprctl eval`, a throwaway
+Chromium window (`--user-data-dir` in /tmp, `CHROME_DESKTOP` unset so its
+class is `chromium-browser`) and two `scripts/fake-browser-tabs.py`: one as
+that Chromium's pid, one as a Zen with no window.
+
+| Case | Result |
+|---|---|
+| Two descriptors appear | both sources connect, the grid column lists both browsers' tabs, each with its browser's name |
+| `--legacy` model | imported once into the state file, `legacy-ack` sent, members relinked by browser and URL |
+| Essential without a tab (hint key) | `create {url}` goes to the browser it was pinned from, and the new tab is adopted |
+| Grid "Pin" and "Move to group" | saved locally, no command to the browser |
+| Ctrl down, Tab, Ctrl up within 70 ms | `activate` for MRU entry 1, the list never draws |
+| Held: Tab, wait 400 ms, Tab, Tab, release | the list shows and holds the keyboard, the binds still fire, entry 3 activates once |
+| Held, Esc, release | nothing activates |
+| Ctrl+Shift+Tab tap | the oldest tab, here in the other browser |
+| Held, Return | activates; the later release is a no-op |
+| Ctrl+Shift+C | the front tab's URL on the clipboard (`wl-paste` in the lab) |
+| `get_active_window()` while the list holds the keyboard | still the browser window |
+| Front Chromium without a host | gets its own Ctrl+Tab through `send_shortcut`, the tab changes |
+
+A global dispatched from a Lua bind's callback follows that bind: from the
+Ctrl+Tab bind the shell sees a press and then a release, from the Ctrl
+release bind only a release (checked with temporary logging). So
+`tabs-next`/`tabs-prev` act on the press and `tabs-commit` on either.

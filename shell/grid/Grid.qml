@@ -8,6 +8,7 @@ import Quickshell.Hyprland
 import Quickshell.Io
 import "../services" as Services
 import ".."
+import "tabs.js" as TabsJs
 
 // Environment grid: one roll per leaf environment, one frame per slot. A
 // thread's roll carries its worktree's and project's frames too, tagged
@@ -42,6 +43,137 @@ PanelWindow {
     readonly property var rows: Services.Hyprnav.rows
     readonly property var selectedRow: rows[selRow] ?? null
     readonly property var selectedCell: selectedRow ? (selectedRow.cells[selCol]?.snapshot ?? null) : null
+
+    // Browser tabs, in a column left of the rolls while the browser runs (see
+    // services/BrowserTabs.qml). `zone` says which side the keys move on;
+    // typing a hint jumps to a tab from either side.
+    readonly property bool tabsShown: Services.BrowserTabs.available
+    // "/" searches the tab column: letters go to the query instead of the
+    // hints, and the column keeps only what matches.
+    property bool searching: false
+    property string tabQuery: ""
+    readonly property var tabsModel: TabsJs.build(Services.BrowserTabs.snapshot, searching ? tabQuery : null, frozenAccess)
+    // Preview: while the selection is in the tab column, the browser comes
+    // forward behind the grid and follows it tab by tab; the rolls and the
+    // glass outside the column step aside so it shows. Enter keeps the tab,
+    // closing any other way puts back the tab and window it started from.
+    readonly property bool previewing: phase === "open" && tabsShown && zone === "tabs"
+    // What the window shows: the tab column alone. Unlike `previewing` it
+    // holds through the fade out, so closing from the column never brings
+    // the rolls back for a frame. The rolls and scrim follow it in a fade
+    // only while the grid is up; on open they start in place.
+    readonly property bool tabsLook: phase !== "closed" && tabsShown && zone === "tabs"
+    property var frozenAccess: null
+    property var origin: null          // { tabId, address } at open
+    property bool previewed: false
+    property string previewKey: ""
+    function captureOrigin() {
+        const access = {};
+        // The shell's recency, as Ctrl+Tab orders them (see tabs/mru.js).
+        for (const t of (Services.BrowserTabs.snapshot?.tabs ?? [])) access[t.id] = Services.BrowserTabs.recency(t);
+        frozenAccess = access;
+        const here = TabsJs.build(Services.BrowserTabs.snapshot, null, access).selectables.find(x => x.here);
+        const top = Hyprland.activeToplevel;
+        origin = { tabId: here ? here.tabId : null, address: top ? addr(top) : "" };
+        previewed = false; previewKey = "";
+    }
+    function undoPreview() {
+        if (!previewed || !origin) return;
+        previewed = false; previewKey = "";
+        Services.BrowserTabs.restore(origin.tabId, origin.address);
+    }
+    // Previews wait for the selection to rest: a moment after a step or a
+    // hover, longer while typing a query, so each keystroke does not switch
+    // the browser to a tab the next one will filter away. Enter does not
+    // wait: it opens the selection whatever is pending.
+    readonly property int previewDelay: 120
+    readonly property int previewTypingDelay: 350
+    property bool typedLast: false     // the last selection change came from the query
+    function schedulePreview() {
+        previewTimer.interval = typedLast ? previewTypingDelay : previewDelay;
+        previewTimer.restart();
+    }
+    onSelectedTabChanged: if (previewing) schedulePreview()
+    onPreviewingChanged: {
+        if (previewing) schedulePreview();
+        else { previewTimer.stop(); if (phase === "open") undoPreview(); }   // back to the rolls
+    }
+    property bool settingQuery: false
+    Timer {
+        id: previewTimer
+        interval: win.previewDelay
+        onTriggered: {
+            const item = win.selectedTab;
+            if (!win.previewing || !item || item.key === win.previewKey) return;
+            if (item.kind !== "tab" && !(item.kind === "essential" && item.tabId !== null && item.tabId !== undefined)) return;
+            win.previewKey = item.key; win.previewed = true;
+            Services.BrowserTabs.preview(item);
+        }
+    }
+    function setQuery(q) {
+        typedLast = true; settingQuery = true;
+        tabQuery = q; tabSel = TabsJs.searchStart(tabsModel.selectables, q);
+        settingQuery = false;
+        if (previewing) schedulePreview();
+    }
+    function startSearch() {
+        if (!tabsShown) return;
+        searching = true; hintPrefix = ""; zone = "tabs"; userMoved = true;
+        setQuery("");
+    }
+    function stopSearch() { searching = false; tabQuery = ""; }
+    property string zone: "grid"       // grid | tabs
+    property int tabSel: 0
+    property string hintPrefix: ""
+    readonly property var selectedTab: zone === "tabs" ? (tabsModel.selectables[tabSel] ?? null) : null
+    onTabsShownChanged: if (!tabsShown) { zone = "grid"; hintPrefix = ""; }
+    // Snapshots rebuild the entries; the selection follows its entry, not
+    // its position.
+    property string tabSelKey: ""
+    onTabSelChanged: {
+        tabSelKey = tabsModel.selectables[tabSel]?.key ?? "";
+        // Anything but the query moving the selection previews at the quick pace.
+        if (!settingQuery) typedLast = false;
+    }
+    onTabsModelChanged: {
+        const kept = tabSelKey ? tabsModel.selectables.findIndex(x => x.key === tabSelKey) : -1;
+        if (kept >= 0) tabSel = kept;
+        else tabSel = Math.max(0, Math.min(tabSel, tabsModel.selectables.length - 1));
+    }
+    function enterTabs() {
+        if (!tabsShown || tabsModel.selectables.length === 0) return;
+        typedLast = false;
+        tabSel = Math.max(0, Math.min(tabSel, tabsModel.selectables.length - 1));
+        zone = "tabs"; userMoved = true;
+    }
+    function moveTab(d) {
+        const n = tabsModel.selectables.length; if (n === 0) return;
+        typedLast = false;
+        tabSel = Math.max(0, Math.min(n - 1, tabSel + d));
+    }
+    // A completed hint opens its entry; with Shift it only selects it, for
+    // the palette's actions.
+    function typeHint(ch, selectOnly) {
+        let res = TabsJs.resolve(tabsModel.selectables, hintPrefix + ch);
+        // A letter that leads nowhere after a prefix starts over.
+        if (!res.exact && !res.partial && hintPrefix !== "") {
+            hintPrefix = "";
+            res = TabsJs.resolve(tabsModel.selectables, ch);
+        }
+        if (res.exact) {
+            hintPrefix = ""; typedLast = false;
+            tabSel = res.exact.index; zone = "tabs"; userMoved = true;
+            if (!selectOnly) activateTab(res.exact);
+        } else if (res.partial) hintPrefix += ch;
+    }
+    function activateTab(item) {
+        if (!item || phase !== "open") return;
+        previewed = false;   // keep what was previewed: it is the choice
+        previewTimer.stop();
+        phase = "activating";
+        hide();
+        afterRelease.run(() => Services.BrowserTabs.open(item));
+    }
 
     anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
@@ -94,6 +226,7 @@ PanelWindow {
         }
         selRow = pos.r; selCol = Math.max(0, Math.min(pos.c, (rs[pos.r]?.cells.length ?? 1) - 1));
         selEnv = rs[pos.r]?.envId ?? "";
+        zone = "grid"; hintPrefix = ""; searching = false; tabQuery = ""; typedLast = false;
         userMoved = false;
     }
     // Hover selects only once the pointer has moved since the open (see
@@ -113,12 +246,48 @@ PanelWindow {
         pendingScroll = true;
         perf.arm("open");
         finish.stop();
+        // Into the column before the phase flips, so the window opens showing
+        // the column alone instead of fading the rolls in and out again. The
+        // current tab needs no preview: it would only pull the browser's
+        // workspace in under the column before the user has moved.
+        if (tabsOnOpen) {
+            tabsOnOpen = false; focusTabs();
+            if (selectedTab) previewKey = selectedTab.key;
+        }
         phase = "open"; open = true; keys.forceActiveFocus();
         settleScroll();
+    }
+    // Open with the selection in the tab column, on the current tab. show()
+    // may present only once the snapshot arrives, so that happens in present().
+    // A second press closes from the column, as grid-toggle does. A press
+    // right after the last one is a bounce or a repeat and does nothing, so
+    // the grid never opens and closes, or closes and reopens, in a blink.
+    property bool tabsOnOpen: false
+    readonly property int repeatGuard: 300
+    property double tabsPressedAt: 0
+    function showTabs() {
+        const now = Date.now();
+        if (now - tabsPressedAt < repeatGuard) return;
+        tabsPressedAt = now;
+        if (waitingOpen) { tabsOnOpen = true; return; }
+        if (phase === "open") {
+            if (zone === "tabs" || !tabsShown) close(); else focusTabs();
+            return;
+        }
+        tabsOnOpen = true;
+        show();
+    }
+    function focusTabs() {
+        if (!tabsShown || tabsModel.selectables.length === 0) return;
+        hintPrefix = "";
+        if (zone !== "tabs") tabSel = TabsJs.searchStart(tabsModel.selectables, "");
+        enterTabs();
     }
     function show() {
         if (phase === "open") return;
         if (perf.enabled) console.info("[perf] grid show() at " + Date.now());
+        Services.BrowserTabs.poke();
+        captureOrigin();
         // Open from the snapshot in hand; the fresh one only corrects the
         // starting frame if the user has not moved yet.
         const cached = Services.Hyprnav.grid;
@@ -134,9 +303,12 @@ PanelWindow {
     function toggle() { if (phase === "open") close(); else show(); }
     function showPalette() { palette.actions = paletteActions(); palette.show(); }
     function close() {
-        waitingOpen = false;
+        waitingOpen = false; tabsOnOpen = false;
         if (phase !== "open") return;
+        const undo = previewed;
+        previewTimer.stop();
         phase = "closing"; hide();
+        if (undo) afterRelease.run(() => win.undoPreview());
     }
     // Keyboard and input go back at once; the content fades out in tSnap.
     function hide() {
@@ -169,6 +341,7 @@ PanelWindow {
         pick(r, Math.max(0, Math.min(m - 1, target)));
     }
     function activate() {
+        if (zone === "tabs") { activateTab(selectedTab); return; }
         const cell = selectedCell; if (!cell || phase !== "open") return;
         phase = "activating";
         hide();
@@ -208,6 +381,12 @@ PanelWindow {
 
     // Geometry
     readonly property int inset: 160
+    // With the tab column the rolls start right of it. The column sits flush
+    // against the 44 px bar and is as wide as Island's own tab strip, so while
+    // previewing it covers the strip and not the page.
+    readonly property int panelX: 44
+    readonly property int panelW: 244
+    readonly property int leftInset: tabsShown ? panelX + panelW + Theme.s32 + Theme.s16 : inset
     readonly property int cellW: 220
     readonly property int cellH: 138
     readonly property int gap: Theme.s16
@@ -217,7 +396,7 @@ PanelWindow {
     readonly property int lineGap: Theme.s16
     // A roll wider than the window wraps onto further lines of the same roll,
     // left to right, top to bottom. Every line holds the same number of frames.
-    readonly property int availableWidth: width - inset * 2
+    readonly property int availableWidth: width - leftInset - inset
     readonly property int cols: Math.max(1, Math.floor((availableWidth + gap) / (cellW + gap)))
     readonly property int lineH: cellH + nameH + lineGap
     function linesIn(count) { return Math.max(1, Math.ceil(count / cols)); }
@@ -310,7 +489,7 @@ PanelWindow {
         const bottom = top + rowHeight(rows[i]?.cells.length ?? 0);
         return bottom > scrollY + topInset - lineH && top < scrollY + topInset + viewportH + lineH;
     }
-    function cellX(c) { return inset + (c % cols) * (cellW + gap); }
+    function cellX(c) { return leftInset + (c % cols) * (cellW + gap); }
     // Where the cell sits in the stack, and where it sits on the screen.
     function cellTop(r, c) { return rowsTop + (rowTops[r] ?? 0) + titleH + Math.floor(c / cols) * lineH; }
     function cellY(r, c) { return cellTop(r, c) - scrollY; }
@@ -322,9 +501,53 @@ PanelWindow {
         Keys.onPressed: ev => {
             if (ev.key === Qt.Key_P && (ev.modifiers & Qt.ControlModifier)) { if (palette.open) palette.hide(); else win.showPalette(); ev.accepted = true; return; }
             if (palette.open) return;
+            // Hint letters jump to a tab. They include h, so with the column
+            // up h no longer moves left; the arrows still do.
+            const plain = !(ev.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier));
+            if (win.searching) {
+                const ctrl = (ev.modifiers & Qt.ControlModifier) !== 0;
+                if (ctrl && (ev.key === Qt.Key_Backspace || ev.key === Qt.Key_W)) { win.setQuery(TabsJs.deleteWord(win.tabQuery)); ev.accepted = true; return; }
+                if (ctrl && ev.key === Qt.Key_U) { win.setQuery(""); ev.accepted = true; return; }
+                switch (ev.key) {
+                case Qt.Key_Escape: if (win.tabQuery !== "") win.setQuery(""); else win.stopSearch(); break;
+                case Qt.Key_Backspace: win.setQuery(win.tabQuery.slice(0, -1)); break;
+                case Qt.Key_Down: case Qt.Key_Tab: win.moveTab(1); break;
+                case Qt.Key_Up: case Qt.Key_Backtab: win.moveTab(-1); break;
+                case Qt.Key_Return: case Qt.Key_Enter: win.activate(); break;
+                default:
+                    if (plain && ev.text.length === 1 && ev.text >= " ") win.setQuery(win.tabQuery + ev.text);
+                    else return;
+                }
+                ev.accepted = true; return;
+            }
+            if (win.tabsShown && plain && ev.text === "/") { win.startSearch(); ev.accepted = true; return; }
+            const ch = ev.text.toLowerCase();
+            if (win.tabsShown && plain && ch.length === 1 && TabsJs.ALPHABET.indexOf(ch) >= 0) {
+                win.typeHint(ch, (ev.modifiers & Qt.ShiftModifier) !== 0);
+                ev.accepted = true; return;
+            }
+            if (win.hintPrefix !== "" && (ev.key === Qt.Key_Escape || ev.key === Qt.Key_Backspace)) {
+                win.hintPrefix = ""; ev.accepted = true; return;
+            }
+            if (win.zone === "tabs") {
+                switch (ev.key) {
+                case Qt.Key_Down: case Qt.Key_J: case Qt.Key_Tab: win.moveTab(1); break;
+                case Qt.Key_Up: case Qt.Key_K: case Qt.Key_Backtab: win.moveTab(-1); break;
+                case Qt.Key_Home: win.moveTab(-999); break;
+                case Qt.Key_End: win.moveTab(999); break;
+                case Qt.Key_Right: case Qt.Key_L: win.zone = "grid"; break;
+                case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_Space: win.activate(); break;
+                case Qt.Key_Escape: win.close(); break;
+                default: return;
+                }
+                ev.accepted = true; return;
+            }
             switch (ev.key) {
             case Qt.Key_Right: case Qt.Key_L: win.move(0, 1); break;
-            case Qt.Key_Left: case Qt.Key_H: win.move(0, -1); break;
+            case Qt.Key_Left: case Qt.Key_H:
+                // Off the start of a line, into the tab column.
+                if (win.tabsShown && win.selCol % win.cols === 0) win.enterTabs(); else win.move(0, -1);
+                break;
             case Qt.Key_Down: case Qt.Key_J: win.move(1, 0); break;
             case Qt.Key_Up: case Qt.Key_K: win.move(-1, 0); break;
             case Qt.Key_Tab: win.move(0, 1); break;
@@ -366,7 +589,14 @@ PanelWindow {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
         onOpacityChanged: if (opacity === 1 && perf.enabled) console.info("[perf] grid opaque at " + Date.now())
-        Rectangle { anchors.fill: parent; color: Theme.oScrim }
+        Rectangle {
+            anchors.fill: parent; color: Theme.oScrim
+            // Fully clear while previewing: below the glass rule's alpha
+            // cut-off, so the browser shows unblurred. The tab column is an
+            // opaque sheet of its own and needs no tint behind it.
+            opacity: win.tabsLook ? 0 : 1
+            Behavior on opacity { enabled: win.open; NumberAnimation { duration: Theme.tSnap } }
+        }
 
         // Alpha mask for the viewport's soft edges (see layer.effect below).
         Item {
@@ -390,6 +620,11 @@ PanelWindow {
         // The viewport: the stack scrolls inside it, the ring travels with it.
         Item {
             id: viewport
+            opacity: win.tabsLook ? 0 : 1
+            // Hidden rolls build no cells and capture nothing (the rows'
+            // Loaders and thumbnails follow their effective visibility).
+            visible: opacity > 0
+            Behavior on opacity { enabled: win.open; NumberAnimation { duration: Theme.tSnap } }
             x: 0; y: win.topInset
             width: win.width; height: win.viewportH
             clip: true
@@ -417,7 +652,7 @@ PanelWindow {
                         required property var modelData
                         required property int index
                         visible: win.rowVisible(index)
-                        x: win.inset
+                        x: win.leftInset
                         y: win.rowsTop + (win.rowTops[index] ?? 0)
                         width: win.availableWidth
                         height: win.rowHeight(modelData.cells.length)
@@ -654,7 +889,7 @@ PanelWindow {
                 // piece; a selection change slides it in tSnap.
                 Rectangle {
                     id: ring
-                    visible: win.selectedCell !== null
+                    visible: win.selectedCell !== null && win.zone === "grid"
                     readonly property int pad: 6
                     x: win.cellX(win.selCol) - pad
                     y: win.cellTop(win.selRow, win.selCol) - pad
@@ -683,6 +918,27 @@ PanelWindow {
                 Behavior on opacity { NumberAnimation { duration: Theme.tSnap } }
             }
         }
+
+        TabsPanel {
+            id: tabsPanel
+            visible: win.tabsShown
+            x: win.panelX; y: Theme.s8
+            width: win.panelW; height: win.height - Theme.s8 * 2
+            // One short line; the palette (Ctrl+P) lists the rest.
+            keyHints: win.searching ? "Enter opens · Esc clears"
+                : win.zone === "tabs" ? "Shift+key selects · / search"
+                : "/ search tabs · Ctrl+P actions"
+            model: win.tabsModel
+            selIndex: win.zone === "tabs" ? win.tabSel : -1
+            prefix: win.hintPrefix
+            searching: win.searching
+            query: win.tabQuery
+            live: win.open
+            hoverArmed: hoverGate.armed
+            onPointerMoved: (item, x, y) => hoverGate.moved(item, x, y)
+            onHovered: index => { if (!win.scrolling) { win.typedLast = false; win.tabSel = index; win.zone = "tabs"; win.userMoved = true; } }
+            onPicked: item => { win.tabSel = item.index; win.zone = "tabs"; win.activateTab(item); }
+        }
     }
 
     // Command palette
@@ -695,8 +951,26 @@ PanelWindow {
         onOpenChanged: if (!open) keys.forceActiveFocus()
     }
     readonly property var paletteActions: function() {
-        const cell = win.selectedCell; const row = win.selectedRow;
+        const cell = win.zone === "grid" ? win.selectedCell : null; const row = win.zone === "grid" ? win.selectedRow : null;
         const list = [];
+        const tab = win.selectedTab;
+        if (tab && tab.kind === "tab") {
+            list.push({ id: "tab-open", scope: "tab", title: "Open tab" });
+            list.push({ id: "tab-pin", scope: "tab", title: "Pin to Essentials" });
+            list.push({ id: "tab-group", scope: "tab", title: "Move to group…", needsText: true, prompt: "Group", defaultText: "" });
+            if (tab.groupId) list.push({ id: "tab-ungroup", scope: "tab", title: "Remove from group" });
+            if (tab.groupId) list.push({ id: "group-rename", scope: "group", title: "Rename group", needsText: true, prompt: "Name", defaultText: (win.tabsModel.sections.find(s => s.groupId === tab.groupId) || {}).title || "" });
+            if (tab.groupId) list.push({ id: "group-delete", scope: "group", title: "Delete group (tabs stay open)" });
+            list.push({ id: "tab-close", scope: "tab", title: "Close tab" });
+        } else if (tab && tab.kind === "essential") {
+            list.push({ id: "tab-open", scope: "essential", title: "Open essential" });
+            list.push({ id: "essential-rename", scope: "essential", title: "Rename essential", needsText: true, prompt: "Name", defaultText: tab.title });
+            list.push({ id: "essential-unpin", scope: "essential", title: "Remove from Essentials" });
+        }
+        if (win.tabsShown) {
+            list.push({ id: "browser-new", scope: "browser", title: "Open in new tab…", needsText: true, prompt: "URL or search", defaultText: "" });
+            list.push({ id: "browser-pin-active", scope: "browser", title: "Pin the browser's current tab to Essentials" });
+        }
         if (cell) {
             list.push({ id: "open", scope: "frame", title: "Open frame" });
             list.push({ id: "slot-remove", scope: "frame", title: cell.temporary ? "Remove temporary slot" : "Remove slot" });
@@ -765,7 +1039,20 @@ PanelWindow {
     function ownerOf(cell) { return cell.owner_environment_id || cell.binding_environment_id || cell.environment_id; }
     function runAction(action, text) {
         const cell = win.selectedCell; const row = win.selectedRow;
+        const tab = win.selectedTab;
+        const tabs = Services.BrowserTabs;
         switch (action.id) {
+        case "tab-open": win.activateTab(tab); break;
+        case "tab-pin": if (tab) tabs.pin(tab.tabId); break;
+        case "tab-group": if (tab && text.trim()) tabs.assign(tab.tabId, text); break;
+        case "tab-ungroup": if (tab) tabs.unassign(tab.tabId); break;
+        case "tab-close": if (tab) tabs.close(tab.tabId); break;
+        case "group-rename": if (tab) tabs.renameGroup(tab.groupId, text); break;
+        case "group-delete": if (tab) tabs.deleteGroup(tab.groupId); break;
+        case "essential-rename": if (tab) tabs.renameEssential(tab.id, text); break;
+        case "essential-unpin": if (tab) tabs.unpin(tab.id); break;
+        case "browser-new": if (win.phase === "open") { win.phase = "activating"; win.hide(); afterRelease.run(() => tabs.open({ kind: "new", text: text })); } break;
+        case "browser-pin-active": tabs.pinFront(); break;
         case "open": win.activate(); break;
         case "slot-remove": if (cell) Services.Hyprnav.slotRemove(win.ownerOf(cell), cell.slot_index); break;
         case "slot-rename": if (cell) Services.Hyprnav.slotRename(win.ownerOf(cell), cell.slot_index, text.trim()); break;
@@ -791,7 +1078,7 @@ PanelWindow {
         }
     }
 
-    // Key hints, bottom left
+    // Key hints, bottom left. With the tab column up they live on its sheet.
     Text {
         style: Text.Outline; styleColor: Theme.oHalo
         x: win.inset
@@ -800,6 +1087,6 @@ PanelWindow {
         color: Theme.oFixer
         font.family: Theme.sans; font.pixelSize: Theme.fs13
         opacity: content.opacity * 0.8
-        visible: content.visible
+        visible: content.visible && !win.tabsShown
     }
 }
