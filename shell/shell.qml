@@ -267,6 +267,20 @@ ShellRoot {
         }
     }
 
+    // Quickshell never reconnects its Hyprland event socket. Hyprland drops a
+    // client that stops reading for a moment, and after that the active
+    // window, workspaces and monitors all freeze. Watch a socket of our own
+    // (it stalls and drops together with Quickshell's) and exit on loss so
+    // systemd starts a fresh shell.
+    Socket {
+        path: Quickshell.env("XDG_RUNTIME_DIR") + "/hypr/" + Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") + "/.socket2.sock"
+        connected: Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") !== ""
+        parser: SplitParser { onRead: _ => {} }
+        // `connected` stays true after the peer hangs up; only the error
+        // tells. 1 is QLocalSocket::PeerClosedError.
+        onError: err => { if (err === 1) { console.warn("Hyprland event socket closed; exiting for a restart"); Qt.exit(1); } }
+    }
+
     IpcHandler {
         target: "nav"
         function ping(): string { return "pong " + Services.Hyprnav.socketPath + " connected=" + Services.Hyprnav.connected; }
