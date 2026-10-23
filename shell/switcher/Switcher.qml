@@ -40,6 +40,15 @@ PanelWindow {
     // already drops them from the switcher snapshot; this keeps an older daemon
     // honest too.
     readonly property var items: rawItems.filter(it => !win.isTemporary(it))
+    // The cards are keyed by frame, so a fresh snapshot (one comes after
+    // every focus change, to keep the switcher warm) moves and updates the
+    // cards it already has instead of rebuilding every card and thumbnail.
+    readonly property var itemKeys: items.map(it => win.key(it))
+    readonly property var itemByKey: {
+        const m = {};
+        for (const it of items) m[win.key(it)] = it;
+        return m;
+    }
 
     anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
@@ -275,13 +284,14 @@ PanelWindow {
 
         // Frames
         Repeater {
-            model: win.items
+            model: ScriptModel { values: win.itemKeys }
             delegate: Item {
                 id: card
-                required property var modelData
+                required property string modelData
                 required property int index
+                readonly property var item: win.itemByKey[modelData] ?? null
                 readonly property bool isSelected: index === win.selected
-                readonly property var cell: win.cellFor(modelData)
+                readonly property var cell: win.cellFor(item)
                 visible: win.onScreen(index)
                 x: win.cardX(index)
                 y: win.cardY(index)
@@ -297,8 +307,8 @@ PanelWindow {
                     border.color: Qt.rgba(Theme.oPaper.r, Theme.oPaper.g, Theme.oPaper.b, 0.35)
                     WorkspaceThumb {
                         anchors.fill: parent; anchors.margins: 3
-                        workspaceId: card.modelData.workspace_id
-                        fallbackClass: card.modelData.app_class
+                        workspaceId: card.item ? card.item.workspace_id : -1
+                        fallbackClass: card.item ? card.item.app_class : ""
                         live: win.capturing && card.visible
                     }
                     Glyph {
@@ -335,7 +345,7 @@ PanelWindow {
                     Text {
                         style: Text.Outline; styleColor: Theme.oHalo
                         width: win.cardW - 24
-                        text: card.cell ? card.cell.slot_display_name : card.modelData.workspace_name
+                        text: card.cell ? card.cell.slot_display_name : (card.item ? card.item.workspace_name : "")
                         elide: Text.ElideRight
                         color: card.isSelected ? Theme.oPaper : Theme.oFixer
                         font.family: Theme.sans; font.pixelSize: Theme.fs15

@@ -36,7 +36,9 @@ Item {
     readonly property real oy: (height - bbox.h * fit) / 2
 
     Repeater {
-        model: root.toplevels
+        // Diffed, so a workspace event that hands back the same windows keeps
+        // their items instead of rebuilding every miniature.
+        model: ScriptModel { values: root.toplevels }
         delegate: Item {
             id: winItem
             required property var modelData
