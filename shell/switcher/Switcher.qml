@@ -151,6 +151,11 @@ PanelWindow {
         // the window that had it before, on the old workspace, and undoes the
         // switch (seen about half the time in the lab).
         afterRelease.run(() => {
+            // Switch here, at once: the daemon serves one request at a time
+            // and is often busy for 200+ ms building the snapshots that every
+            // focus change asks for. Its goto follows for the bookkeeping (and
+            // a browser slot's tab); landing on the workspace again is a no-op.
+            if (it.workspace_id > 0) Hyprland.dispatch("hl.dsp.focus({ workspace = " + it.workspace_id + " })");
             if (it.environment_id) Services.Hyprnav.gotoSlot(it.environment_id, it.slot_index, done);
             else Services.Hyprnav.gotoPhysical(it.workspace_id, done);
         });

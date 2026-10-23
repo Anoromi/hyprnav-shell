@@ -34,7 +34,12 @@ Singleton {
     property string _lastGridLine: ""
     function request(op, params, cb) {
         const body = Object.assign({ op: op }, params || {});
-        _queue.push({ op: op, line: JSON.stringify(body) + "\n", cb: cb || null });
+        const req = { op: op, line: JSON.stringify(body) + "\n", cb: cb || null };
+        // An action (a goto, a lock) goes ahead of queued snapshot reads, in
+        // the order actions came, so the user is not kept waiting behind them.
+        const reads = ["status_get", "ui_snapshot_grid", "ui_snapshot_switcher"];
+        const at = reads.includes(op) ? -1 : _queue.findIndex(q => reads.includes(q.op));
+        if (at < 0) _queue.push(req); else _queue.splice(at, 0, req);
         _pump();
     }
 
