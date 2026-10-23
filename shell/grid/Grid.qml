@@ -352,10 +352,11 @@ PanelWindow {
         if (undo) afterRelease.run(() => win.undoPreview());
     }
     // Keyboard and input go back at once; the content fades out in tSnap.
+    // The timer starts first so `capturing` never drops (see the switcher).
     function hide() {
+        finish.interval = Theme.tSnap; finish.restart();
         open = false;
         if (palette.open) palette.hide();
-        finish.interval = Theme.tSnap; finish.restart();
     }
     // Left and right walk the roll in reading order, across line breaks; up and
     // down step between lines, and leave the roll only from its first or last

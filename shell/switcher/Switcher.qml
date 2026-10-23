@@ -168,10 +168,14 @@ PanelWindow {
         close();
     }
     // Keyboard and input go back at once; the content fades out in tSnap.
+    // Start the fade timer before dropping `open`: `capturing` is
+    // `open || finish.running`, and the other order let it go false for a
+    // moment, which dropped every capture and showed the fallback icons on
+    // the fading cards.
     function close() {
-        open = false; hold = false;
         finish.interval = Theme.tSnap;
         finish.restart();
+        open = false; hold = false;
     }
     Timer { id: finish; onTriggered: win.phase = "closed" }
     // Thumbnails capture windows only while the overlay is up or fading out.
