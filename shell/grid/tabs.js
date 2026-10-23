@@ -5,15 +5,19 @@
 // are "<source>/<id>" strings. Plain functions so node can test them.
 
 // Dvorak home row, right hand first, index fingers leading: the first
-// rows get the comfortable keys.
+// rows get the comfortable keys. These are the keys hint mode takes.
 var ALPHABET = "htnsdueoai";
+// "n" alone is the "+" New tab tile's; every other hint is spelled without
+// it, so no label starts with or contains it.
+var NEW_TAB_HINT = "n";
+var LABELS = ALPHABET.replace(NEW_TAB_HINT, "");
 
 // Prefix-free labels, Vimium style: as many one-letter labels as fit, and the
 // remaining letters lead two-letter ones. With k letters, p prefixes give
 // (k - p) + p * k labels. The first items keep the short labels, so
 // Essentials, which come first, keep theirs as the tab list grows.
 function hintLabels(count, alphabet) {
-    var letters = alphabet || ALPHABET;
+    var letters = alphabet || LABELS;
     var k = letters.length;
     var out = [];
     if (count <= 0 || k === 0) return out;
@@ -55,10 +59,11 @@ function matches(query, title, url) {
 // reshuffle under the pointer. `selectables` is that same
 // order flattened; each item carries its `index` there and its `hint`.
 //
-// Hints: everything outside the groups, and each group's header, share one
-// prefix-free set. An expanded group's members continue its header's label
-// L: L plus a label over the alphabet without L's first letter. The header
-// itself then answers to L typed twice, which collapses it again.
+// Hints: "New tab" is always "n". Everything else outside the groups, and
+// each group's header, share one prefix-free set over the other letters.
+// An expanded group's members continue its header's label L: L plus a label
+// over those letters without L's first. The header itself then answers to L
+// typed twice, which collapses it again.
 function build(snapshot, query, frozen, expanded) {
     var essentials = [], sections = [], selectables = [];
     if (!snapshot) return { essentials: essentials, sections: sections, selectables: selectables, hereTab: null };
@@ -161,14 +166,16 @@ function build(snapshot, query, frozen, expanded) {
     groups.forEach(function (gr) { selectables.push(gr.header); top.push(gr.header); selectables = selectables.concat(gr.items); });
     selectables = selectables.concat(loose);
     top = top.concat(loose);
-    if (searching) { selectables.push(newTab); top.push(newTab); }
+    if (searching) selectables.push(newTab);
+    top = top.filter(function (x) { return x !== newTab; });
+    newTab.hint = NEW_TAB_HINT;
     var labels = hintLabels(top.length);
     for (var n = 0; n < top.length; n++) top[n].hint = labels[n] || "";
     groups.forEach(function (gr) {
         var base = gr.header.hint;
         gr.header.base = base;
         if (!gr.expanded) return;
-        var sub = base ? hintLabels(gr.items.length, ALPHABET.replace(base[0], "")) : [];
+        var sub = base ? hintLabels(gr.items.length, LABELS.replace(base[0], "")) : [];
         gr.header.hint = base ? base + base : "";
         gr.items.forEach(function (x, i) { x.hint = sub[i] ? base + sub[i] : ""; });
     });

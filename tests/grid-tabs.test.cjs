@@ -7,12 +7,13 @@ const path = require("node:path");
 // shell/grid/tabs.js is a QML `.pragma library` script: plain JS once the
 // pragma line is gone.
 const source = fs.readFileSync(path.join(__dirname, "../shell/grid/tabs.js"), "utf8").replace(/^\.pragma library\s*$/m, "");
-const T = new Function(`${source}; return { ALPHABET, hintLabels, build, resolve, searchStart, hostOf, matches, deleteWord, flatRows, keyOps };`)();
+const T = new Function(`${source}; return { ALPHABET, LABELS, NEW_TAB_HINT, hintLabels, build, resolve, searchStart, hostOf, matches, deleteWord, flatRows, keyOps };`)();
 
 test("hint labels stay prefix-free and short labels go first", () => {
-  assert.deepEqual(T.hintLabels(3), ["h", "t", "n"], "right hand first");
-  assert.equal(T.hintLabels(10).join(""), T.ALPHABET);
-  for (const n of [11, 19, 20, 37, 100]) {
+  assert.deepEqual(T.hintLabels(3), ["h", "t", "s"], "right hand first, n left out");
+  assert.equal(T.LABELS, "htsdueoai");
+  assert.equal(T.hintLabels(9).join(""), T.LABELS);
+  for (const n of [10, 19, 20, 37, 81]) {
     const labels = T.hintLabels(n);
     assert.equal(labels.length, n);
     assert.equal(new Set(labels).size, n);
@@ -20,9 +21,10 @@ test("hint labels stay prefix-free and short labels go first", () => {
       if (a !== b) assert.ok(!b.startsWith(a), `${a} is a prefix of ${b}`);
     }
   }
-  // Eleven items: one letter turns into a prefix, nine stay single.
-  assert.deepEqual(T.hintLabels(11).slice(0, 9), "htnsdueoa".split(""));
-  assert.equal(T.hintLabels(101).length, 100, "no labels beyond two letters");
+  // Ten items: one letter turns into a prefix, eight stay single.
+  assert.deepEqual(T.hintLabels(10).slice(0, 8), "htsdueoa".split(""));
+  assert.equal(T.hintLabels(82).length, 81, "no labels beyond two letters");
+  for (const l of T.hintLabels(81)) assert.ok(!l.includes("n"), l);
 });
 
 test("build orders essentials, new tab, pinned, groups, then the rest by recency", () => {
@@ -39,7 +41,7 @@ test("build orders essentials, new tab, pinned, groups, then the rest by recency
   };
   const m = T.build(snap);
   assert.deepEqual(m.selectables.map((s) => s.key), ["e:e1", "new", "p:p1", "g:g1", "t:4", "t:2"], "groups start collapsed");
-  assert.deepEqual(m.selectables.map((s) => s.hint), ["h", "t", "n", "s", "d", "u"]);
+  assert.deepEqual(m.selectables.map((s) => s.hint), ["h", "n", "t", "s", "d", "u"], "New tab is always n");
   assert.deepEqual(m.sections.map((s) => s.key), ["pinned", "groups", "loose"]);
   assert.equal(m.sections[0].title, "Pinned");
   assert.deepEqual([m.sections[0].items[0].open, m.sections[0].items[0].title], [false, "Mail"], "a closed pinned tab shows its own title");
@@ -74,6 +76,8 @@ test("a collapsed group takes one hint; expanded, its members continue it", () =
     const items = open.selectables.filter((s) => s.kind === "entry");
     assert.equal(items.length, n);
     for (const it of items) assert.ok(it.hint.startsWith(header.hint) && it.hint.length > header.hint.length, it.hint);
+    assert.equal(open.newTab.hint, "n");
+    for (const s of open.selectables) if (s.kind !== "new") assert.ok(!s.hint.includes("n"), s.hint);
     assert.ok(items.slice(0, Math.min(3, n)).every((i) => i.open), "open members first");
     assert.equal(T.resolve(open.selectables, header.hint).partial, true, "the label alone now waits for a member");
   }
@@ -260,4 +264,16 @@ test("flatRows lists titles, rows and group members with unique keys", () => {
   assert.deepEqual(rows.filter(r => r.gap).map(r => r.key), ["g:1", "s:loose"], "a gap opens every section after the first");
   assert.deepEqual(rows.filter(r => r.indent).map(r => r.key), ["m:1", "m:2"]);
   assert.deepEqual(T.flatRows(T.build(null)), []);
+});
+
+test("New tab answers to n alone, whatever else the column holds", () => {
+  const tabs = Array.from({ length: 30 }, (_, i) => ({ id: `t/${i}`, windowId: 1, index: i, title: `t${i}`, url: `https://t${i}.test/`, lastAccessed: 30 - i }));
+  const essentials = Array.from({ length: 4 }, (_, i) => ({ id: `e${i}`, title: `e${i}`, url: `https://e${i}.test/`, tabId: null }));
+  for (const query of [null, "", "t1"]) {
+    const m = T.build({ essentials, tabs }, query);
+    assert.equal(m.newTab.hint, T.NEW_TAB_HINT);
+    const others = m.selectables.filter((s) => s.kind !== "new").map((s) => s.hint);
+    assert.ok(others.every((h) => h !== "" && !h.includes("n")), others.join(" "));
+    assert.equal(T.resolve(m.selectables, "n").exact, m.newTab);
+  }
 });
