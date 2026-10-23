@@ -178,11 +178,10 @@ PanelWindow {
         open = false; hold = false;
     }
     Timer { id: finish; onTriggered: win.phase = "closed" }
-    // Thumbnails capture windows only while the overlay is up or fading out.
-    // Keyed to `open` and the fade timer rather than `phase`, so a phase left
-    // behind by an interrupted fade can never keep captures running unseen;
-    // a capture still bound when its window closes can take the shell's
-    // Wayland connection down.
+    // Thumbnails take their still frames when the overlay opens and hold
+    // them until it has faded out, then let them go. Keyed to `open` and the
+    // fade timer rather than `phase`, so a phase left behind by an
+    // interrupted fade can never keep frames bound unseen.
     readonly property bool capturing: open || finish.running
     PerfProbe { id: perf; label: "switcher" }
     FocusRelease { id: afterRelease }
@@ -318,7 +317,7 @@ PanelWindow {
                         anchors.fill: parent; anchors.margins: 3
                         workspaceId: card.item ? card.item.workspace_id : -1
                         fallbackClass: card.item ? card.item.app_class : ""
-                        live: win.capturing && card.visible
+                        shown: win.capturing && card.visible
                     }
                     Glyph {
                         anchors.right: parent.right; anchors.top: parent.top

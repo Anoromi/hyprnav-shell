@@ -5,12 +5,23 @@ import Quickshell.Hyprland
 import Quickshell.Wayland
 import Quickshell.Widgets
 
-// Live miniature of one workspace: every window drawn where it sits, scaled
-// to fit. Empty workspaces show the app icon that would open there, or nothing.
+// Miniature of one workspace: every window drawn where it sits, scaled to
+// fit, from one still frame per window. Empty workspaces show the app icon
+// that would open there, or nothing.
+//
+// The frames are stills on purpose. A running capture re-arms on every frame
+// for as long as it is bound, and Quickshell 0.3.1 can send one of those
+// re-arms for a window the compositor has already closed; that is a fatal
+// Wayland error ("invalid object") that takes the whole shell down
+// (quickshell#1123, seen here on 2026-09-27 and 2026-10-12). Each running
+// capture also holds buffers and their fds; many at once ran the shell out
+// of fds (2026-10-06). A still is one request at bind time and nothing after.
 Item {
     id: root
     property int workspaceId: -1
-    property bool live: true
+    // The overlay is up (or fading out) and this miniature is on screen. Only
+    // then does a window hold its frame; dropping it frees the buffers.
+    property bool shown: false
     property string fallbackClass: ""
     property string emptyText: ""
 
@@ -56,7 +67,7 @@ Item {
             property bool gone: false
             Connections {
                 target: Hyprland
-                enabled: root.live && !winItem.gone
+                enabled: root.shown && !winItem.gone
                 function onRawEvent(ev) {
                     if (ev.name === "closewindow" && ev.data.replace(/^0x/, "") === winItem.address) winItem.gone = true;
                 }
@@ -75,12 +86,13 @@ Item {
                 ScreencopyView {
                     id: view
                     anchors.fill: parent
-                    // Only hold a capture while the overlay is shown; a captured
-                    // toplevel that closes while bound kills the Wayland connection.
-                    // Rebinding this restarts the capture and blanks the frame,
-                    // so it changes only when the window itself does.
-                    captureSource: root.live && !winItem.gone ? winItem.wayland : null
-                    live: root.live && !winItem.gone
+                    // Binding the source takes one frame; `live: false` never
+                    // asks for another, so the still stays until the overlay
+                    // hides or the window closes, and then the source drops.
+                    // Rebinding takes a new frame and blanks the old one, so
+                    // the source changes only when the window itself does.
+                    captureSource: root.shown && !winItem.gone ? winItem.wayland : null
+                    live: false
                     paintCursor: false
                 }
                 IconImage {

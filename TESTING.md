@@ -828,3 +828,28 @@ with `--no-navigate`), tabs moved with the fake's `goto`.
 host's manifest in its `NativeMessagingHosts`, its own runtime dir): the
 snapshot carries `caps: ["navigate"]`, the tab loads the home page in place
 with the same id.
+
+## Still thumbnails instead of running captures (2026-10-23)
+
+The live journal had two kinds of shell death, both from window captures:
+`wl_display#1: error 0: invalid object 195` right after an app quit
+(2026-10-12; quickshell#1123 on the same Quickshell 0.3.1 and Hyprland
+0.56.2), and six exits in eight minutes on "Too many open files" from
+dmabuf and shm buffers (2026-10-06). A running capture re-arms on every
+frame for as long as it is bound, and each re-arm is a chance to name a
+window the compositor has closed. `WorkspaceThumb` now binds each window
+with `live: false` while the overlay is shown (`shown`), which is one
+request at bind time; the still stays through the fade and the source drops
+once the overlay is hidden or the window's `closewindow` arrives. The unit
+also runs with `LimitNOFILE=65536` (mynix).
+
+Lab (`HNS_PORTALS=0 lab.py up`, the same Quickshell 0.3.1 store path as the
+live unit, `WAYLAND_DEBUG=client` filtered to capture requests), with
+`wf-recorder` recording the lab output the whole time as a screencast load:
+
+| Check | How | Result |
+|---|---|---|
+| One capture per window | switcher open with 8 kitty windows, held 3 s | 8 `capture_toplevel`, 8 `ready`, nothing after |
+| Churn | about 50 cycles of Super+Tab hold and the grid, killing and spawning kitty windows while each was up | shell alive on the same pid; 916 captures, 914 ready, 1 `failed` handled; no fatal error |
+| Release | 60 fps recording of the card through two closes | the still stays through the fade, no fallback icons |
+| Nothing held while hidden | shell fds closed / grid open / closed | 62, 83, 62 |

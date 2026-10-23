@@ -396,11 +396,10 @@ PanelWindow {
         if (row.locked) Services.Hyprnav.unlock(); else Services.Hyprnav.lock(row.envId);
     }
     Timer { id: finish; onTriggered: win.phase = "closed" }
-    // Thumbnails capture windows only while the overlay is up or fading out.
-    // Keyed to `open` and the fade timer rather than `phase`, so a phase left
-    // behind by an interrupted fade can never keep captures running unseen;
-    // a capture still bound when its window closes can take the shell's
-    // Wayland connection down.
+    // Thumbnails take their still frames when the overlay opens and hold
+    // them until it has faded out, then let them go. Keyed to `open` and the
+    // fade timer rather than `phase`, so a phase left behind by an
+    // interrupted fade can never keep frames bound unseen.
     readonly property bool capturing: open || finish.running
     // A roll can lose frames under the grid; keep the selection on a real cell
     // so the ring and the line arithmetic stay valid.
@@ -805,7 +804,7 @@ PanelWindow {
                                                 // A hidden row still holds its captures unless
                                                 // they are dropped here; with hundreds of rolls
                                                 // that ran out of fds and pinned the GPU.
-                                                live: win.capturing && rowItem.visible
+                                                shown: win.capturing && rowItem.visible
                                                 emptyText: cellItem.hasWindows ? "" : (cellItem.cell.subtitle && cellItem.cell.subtitle.indexOf("Workspace") !== 0 ? "Opens " + cellItem.cell.subtitle : "Empty frame")
                                             }
                                             // Pin: a spawned process tree is stuck to this frame.
