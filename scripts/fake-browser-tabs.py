@@ -8,13 +8,15 @@ serves a made-up snapshot there, prints every command it receives, and
 applies the ones that change the tabs so the shell updates as it would. Run
 several with different --browser/--pid for several browsers.
 
-    scripts/fake-browser-tabs.py [--browser island] [--pid N] [--tabs N] [--legacy] [--no-navigate]
+    scripts/fake-browser-tabs.py [--browser island] [--pid N] [--tabs N] [--legacy] [--no-navigate] [--firefox]
 
 --pid names the browser process the shell looks for among Hyprland's
 windows (default: this script's own pid, which has none, so window lookup
 falls back to the browser's window class). --legacy also sends the old
 extension's Essentials and groups until the shell acknowledges them.
---no-navigate plays an extension from before the navigate command. A
+--no-navigate plays an extension from before the navigate command.
+--firefox reports each window's selected tab as accessed at the moment of
+the snapshot, as Firefox and Zen do. A
 {"type": "goto", "tabId", "url"} sent to the socket moves a tab as browsing
 would.
 """
@@ -59,9 +61,10 @@ def fake_icon(site):
 
 
 class State:
-    def __init__(self, extra, legacy, now, navigate=True):
+    def __init__(self, extra, legacy, now, navigate=True, firefox=False):
         self.tabs = []
         self.navigate = navigate
+        self.firefox = firefox
         self.next_id = 100
         self.legacy = legacy
         self.add("Inbox · Linear", "https://linear.app/inbox", accessed=now - 50)
@@ -101,7 +104,11 @@ class State:
             active = next((t for t in self.tabs if t["windowId"] == window and t["active"]), None)
             windows.append({"id": window, "focused": window == 1, "activeTitle": active["title"] if active else ""})
         icons = {t["icon"]: fake_icon(t["icon"]) for t in self.tabs}
-        snap = {"type": "snapshot", "windows": windows, "tabs": self.tabs, "icons": icons}
+        tabs = self.tabs
+        if self.firefox:
+            now = int(time.time() * 1000)
+            tabs = [dict(t, lastAccessed=now) if t["active"] else t for t in tabs]
+        snap = {"type": "snapshot", "windows": windows, "tabs": tabs, "icons": icons}
         if self.navigate:
             snap["caps"] = ["navigate"]
         if self.legacy:
@@ -146,6 +153,7 @@ def main():
     parser.add_argument("--tabs", type=int, default=8, help="extra tabs")
     parser.add_argument("--legacy", action="store_true", help="also send an old-extension model")
     parser.add_argument("--no-navigate", action="store_true", help="no navigate command, as an old extension")
+    parser.add_argument("--firefox", action="store_true", help="selected tabs read as accessed now, as in Firefox")
     args = parser.parse_args()
     directory = os.environ.get("HNS_TABS_DIR") or os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "browser-tabs")
     os.makedirs(directory, mode=0o700, exist_ok=True)
@@ -166,7 +174,7 @@ def main():
         os.unlink(path)
     # Distinct clocks per browser, so merged MRU interleaves them.
     state = State(args.tabs, args.legacy, int(time.time() * 1000) - (sum(map(ord, args.browser)) % 7) * 1000,
-                  navigate=not args.no_navigate)
+                  navigate=not args.no_navigate, firefox=args.firefox)
     clients = []
     lock = threading.Lock()
 

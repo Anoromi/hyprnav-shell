@@ -1,20 +1,25 @@
 .pragma library
 
 // Most-recently-used order over the merged tabs of every browser, for
-// Ctrl+Tab. Browsers only update a tab's lastAccessed for their own
-// switches, so the shell stamps a tab when it becomes the one in front: its
-// window gains the Hyprland focus, or the focused window shows a new tab.
-// A tab's recency is the later of the two.
+// Ctrl+Tab. A tab counts as used only while it is in front: the shell stamps
+// it when its window gains the Hyprland focus, when the focused window shows
+// a new tab, or when the shell activates it. A browser's own lastAccessed
+// moves for switches in a window nobody looks at, and Zen reports every
+// window's selected tab as accessed right now, so it only orders the tabs
+// the shell has not seen in front since `since` (its start), below all of
+// those it has.
 
-function recency(tab, stamps) {
-    return Math.max(tab.lastAccessed || 0, (stamps && stamps[tab.id]) || 0);
+function recency(tab, stamps, since) {
+    var stamped = stamps && stamps[tab.id];
+    if (stamped) return stamped;
+    return Math.min(tab.lastAccessed || 0, since || 0);
 }
 
 // Most recent first; the tab in front leads whatever the clocks say, so the
 // first Ctrl+Tab always lands on the one before it.
-function order(tabs, stamps, current) {
+function order(tabs, stamps, current, since) {
     var out = tabs.slice().sort(function (a, b) {
-        return recency(b, stamps) - recency(a, stamps) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+        return recency(b, stamps, since) - recency(a, stamps, since) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     });
     for (var i = 0; i < out.length; i++) {
         if (out[i].id === current) {

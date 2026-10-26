@@ -853,3 +853,28 @@ live unit, `WAYLAND_DEBUG=client` filtered to capture requests), with
 | Churn | about 50 cycles of Super+Tab hold and the grid, killing and spawning kitty windows while each was up | shell alive on the same pid; 916 captures, 914 ready, 1 `failed` handled; no fatal error |
 | Release | 60 fps recording of the card through two closes | the still stays through the fade, no fallback icons |
 | Nothing held while hidden | shell fds closed / grid open / closed | 62, 83, 62 |
+
+## Ctrl+Tab ignores tabs switched in a browser nobody looks at (2026-10-26)
+
+With Island in front, the first Ctrl+Tab went to Zen's selected tab. A tab's
+recency was the later of the shell's stamp and the browser's `lastAccessed`,
+and Zen (as Firefox) reports every window's selected tab as accessed at the
+moment of each snapshot; Chromium also moves `lastAccessed` for switches in a
+background window. Now a tab the shell has stamped ranks by that stamp
+alone, and the browser's time only orders the tabs never seen in front since
+the shell started, capped at its start, so below every stamped one.
+
+Lab (`scripts/lab.py up`), two kitty windows with the classes
+`island-browser` and `zen`, a `scripts/fake-browser-tabs.py` for each with
+their pids, the Zen one with the new `--firefox`. Island focused, its tabs
+101 then 102 activated, then Zen's 101 activated through its socket, then a
+Zen refresh; `ipc call tabs next`, `commit`.
+
+| Shell | MRU after the Zen activation | Ctrl+Tab activates |
+|---|---|---|
+| before (391bd93) | island/102, zen/101, island/101, … | zen 101 |
+| now | island/102, island/101, island/103, … | island 101 |
+
+Not checked in the lab: real Island and Zen; the shell's first Ctrl+Tab
+after its own start, before any switch, still falls back to the browsers'
+times, where Zen's selected tab counts as accessed at the shell's start.

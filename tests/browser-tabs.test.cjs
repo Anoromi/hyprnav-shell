@@ -243,18 +243,36 @@ test("a Hyprland window maps back to its browser window", () => {
   assert.equal(M.windowForClient({ pid: 5, class: "foot", title: "x" }, sources, windows), null);
 });
 
-test("MRU puts the tab in front first, then by the later of browser and shell times", () => {
+test("MRU orders by the shell's stamps, then by browser times from before it started", () => {
+  const since = 1000;
   const tabs = [
     { id: "a/1", lastAccessed: 100 },
     { id: "b/1", lastAccessed: 300 },
     { id: "a/2", lastAccessed: 200 },
   ];
-  assert.deepEqual(R.order(tabs, {}, null).map((t) => t.id), ["b/1", "a/2", "a/1"]);
+  assert.deepEqual(R.order(tabs, {}, null, since).map((t) => t.id), ["b/1", "a/2", "a/1"]);
   // Focusing browser a's window stamped its tab after b's.
-  assert.deepEqual(R.order(tabs, { "a/1": 400 }, null).map((t) => t.id), ["a/1", "b/1", "a/2"]);
-  assert.deepEqual(R.order(tabs, {}, "a/1").map((t) => t.id), ["a/1", "b/1", "a/2"], "the current tab leads");
+  assert.deepEqual(R.order(tabs, { "a/1": 1400 }, null, since).map((t) => t.id), ["a/1", "b/1", "a/2"]);
+  assert.deepEqual(R.order(tabs, {}, "a/1", since).map((t) => t.id), ["a/1", "b/1", "a/2"], "the current tab leads");
   const stamps = R.stamp({ "gone/1": 5, "a/2": 7 }, "b/1", 900, tabs);
   assert.deepEqual(stamps, { "a/2": 7, "b/1": 900 }, "closed tabs drop out");
+});
+
+test("tabs switched in a browser nobody looks at do not jump the MRU", () => {
+  const since = 1000;
+  // Used in Island only: island/2, then island/1, now in front. Zen in the
+  // background reports its selected tab as accessed now, and an Island tab
+  // activated in a background window got a fresh browser time.
+  const tabs = [
+    { id: "island/1", lastAccessed: 1200 },
+    { id: "island/2", lastAccessed: 1100 },
+    { id: "island/3", lastAccessed: 4000 },
+    { id: "zen/7", lastAccessed: 5000, active: true },
+  ];
+  const stamps = { "island/2": 1100, "island/1": 1200, "zen/7": 1050 };
+  assert.deepEqual(R.order(tabs, stamps, "island/1", since).map((t) => t.id), ["island/1", "island/2", "zen/7", "island/3"]);
+  assert.equal(R.recency(tabs[3], stamps, since), 1050, "a stamped tab keeps the shell's time");
+  assert.equal(R.recency(tabs[2], stamps, since), since, "an unseen tab counts no later than the shell's start");
 });
 
 test("a cycle starts before the current tab, or on the oldest backwards, and wraps", () => {

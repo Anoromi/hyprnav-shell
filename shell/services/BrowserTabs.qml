@@ -138,6 +138,7 @@ Singleton {
     // MRU stamps (see tabs/mru.js): the tab in front of a focused browser
     // window, each time that changes.
     property var stamps: ({})
+    readonly property real _since: Date.now()
     property string _stamped: ""
     function _stampFront() {
         const w = snapshot ? frontWindow() : null;
@@ -147,13 +148,13 @@ Singleton {
         _stamped = key;
         if (key) stamps = Mru.stamp(stamps, key, Date.now(), snapshot.tabs);
     }
-    function recency(t) { return Mru.recency(t, stamps); }
+    function recency(t) { return Mru.recency(t, stamps, _since); }
     function stamp(key) { if (snapshot) { stamps = Mru.stamp(stamps, key, Date.now(), snapshot.tabs); _stamped = key; } }
     function mruTabs() {
         if (!snapshot) return [];
         const w = frontWindow();
         const current = w ? activeTabOf(w.id) : null;
-        return Mru.order(snapshot.tabs, stamps, current ? current.id : null);
+        return Mru.order(snapshot.tabs, stamps, current ? current.id : null, _since);
     }
     Connections {
         target: Hyprland
