@@ -444,7 +444,7 @@ SheetWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.preferredHeight: Theme.qsHeaderH
-                        Heading { text: "Sound"; Layout.fillWidth: true }
+                        Heading { text: "Output"; Layout.fillWidth: true }
                     }
                     RowLayout {
                         Layout.fillWidth: true; spacing: Theme.s8
@@ -464,17 +464,32 @@ SheetWindow {
                         step: Theme.rowCompactH + Theme.listGap
                         model: ScriptModel { values: Services.Audio.sinks }
                         placeholder: "No outputs."
-                        delegate: Pressable {
-                            id: sinkRow
-                            required property var modelData
-                            readonly property bool isDefault: Services.Audio.sink === modelData
-                            width: ListView.view.width; implicitHeight: Theme.rowCompactH
-                            RowLayout {
-                                anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
-                                Glyph { text: sinkRow.isDefault ? "󰄬" : " "; color: Theme.pencil; size: 13; Layout.preferredWidth: 16 }
-                                Text { text: sinkRow.modelData.nickname || sinkRow.modelData.description || sinkRow.modelData.name; color: sinkRow.isDefault ? Theme.paper : Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13; Layout.fillWidth: true; elide: Text.ElideRight }
-                            }
-                            onClicked: Services.Audio.setSink(sinkRow.modelData)
+                        delegate: DeviceRow {
+                            isDefault: Services.Audio.sink === modelData
+                            onClicked: Services.Audio.setSink(modelData)
+                        }
+                    }
+                    Heading { Layout.topMargin: Theme.s8; text: "Input" }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: Theme.s8
+                        Pressable {
+                            implicitWidth: 28; implicitHeight: 28
+                            CrossGlyph { anchors.centerIn: parent; text: Services.Audio.micIcon(); size: 18; color: Services.Audio.sourceMuted ? Theme.fixer : Theme.paper }
+                            onClicked: Services.Audio.toggleSourceMute()
+                        }
+                        Slider { id: micVol; Layout.fillWidth: true; value: Services.Audio.sourceVolume; enabled: Services.Audio.sourceReady; onDraggingChanged: perf.track("mic drag", dragging); onMoved: v => Services.Audio.setSourceVolume(v) }
+                        ValueLabel { slider: micVol }
+                    }
+                    ScrollList {
+                        id: sourceList
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Theme.sinkListH
+                        step: Theme.rowCompactH + Theme.listGap
+                        model: ScriptModel { values: Services.Audio.sources }
+                        placeholder: "No inputs."
+                        delegate: DeviceRow {
+                            isDefault: Services.Audio.source === modelData
+                            onClicked: Services.Audio.setSource(modelData)
                         }
                     }
                     Heading { Layout.topMargin: Theme.s8; text: "Screen brightness" }
@@ -501,6 +516,19 @@ SheetWindow {
                 }
             }
             ScrollEdges { visible: soundFlick.visible; anchors.fill: soundFlick; flick: soundFlick; step: Theme.rowH }
+        }
+    }
+
+    // An output or input in the sound view: a tick on the default one.
+    component DeviceRow: Pressable {
+        id: devRow
+        required property var modelData
+        property bool isDefault: false
+        width: ListView.view.width; implicitHeight: Theme.rowCompactH
+        RowLayout {
+            anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
+            Glyph { text: devRow.isDefault ? "󰄬" : " "; color: Theme.pencil; size: 13; Layout.preferredWidth: 16 }
+            Text { text: Services.Audio.nodeName(devRow.modelData); color: devRow.isDefault ? Theme.paper : Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13; Layout.fillWidth: true; elide: Text.ElideRight }
         }
     }
 

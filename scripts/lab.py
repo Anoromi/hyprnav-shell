@@ -11,7 +11,7 @@ and state, so nothing touches the live desktop. Commands:
   lab.py status    the scope's memory use
   lab.py env       print `export` lines for the nested session
   lab.py exec CMD  run CMD inside the nested session (and the lab's scope)
-  lab.py audio     start a private PipeWire + WirePlumber with one null sink
+  lab.py audio     start a private PipeWire + WirePlumber with null sinks and mics
                    inside the lab, so volume checks never touch the host
 
 `up` re-runs itself under `systemd-run --user --scope` with a memory cap
@@ -270,8 +270,8 @@ hl.window_rule({{
     print(hc("monitors"))
 
 def audio():
-    """Private PipeWire for the lab: no ALSA, Bluetooth or camera monitors, one
-    null sink named "Lab speakers". Rewrites env.json so later lab commands and
+    """Private PipeWire for the lab: no ALSA, Bluetooth or camera monitors, null
+    sinks ("Lab speakers", "Lab headphones") and two null microphones. Rewrites env.json so later lab commands and
     the shell talk to it instead of the host's PipeWire."""
     env = load_env()
     runtime = env["XDG_RUNTIME_DIR"]
@@ -289,10 +289,42 @@ def audio():
     args = {
       factory.name = support.null-audio-sink
       node.name = "lab-speakers"
+      priority.session = 1000
       node.description = "Lab speakers"
       media.class = Audio/Sink
       audio.position = [ FL FR ]
       monitor.channel-volumes = true
+    }
+  }
+  { factory = adapter
+    args = {
+      factory.name = support.null-audio-sink
+      node.name = "lab-headphones"
+      priority.session = 900
+      node.description = "Lab headphones"
+      media.class = Audio/Sink
+      audio.position = [ FL FR ]
+    }
+  }
+]
+# Microphones: loopbacks whose playback side is a plain Audio/Source (the
+# class real mics have; a null node of that class stalls WirePlumber, and
+# Quickshell ignores Audio/Source/Virtual). The capture side is a stream.
+# Quickshell gets no channel volumes from these, so the mic slider reads 0
+# in the lab; switching and real mics are fine.
+context.modules = [
+  { name = libpipewire-module-loopback
+    args = {
+      node.description = "Lab microphone"
+      capture.props = { node.name = "lab-mic-in" audio.position = [ MONO ] node.passive = true }
+      playback.props = { node.name = "lab-mic" node.description = "Lab microphone" media.class = Audio/Source audio.position = [ MONO ] priority.session = 1000 }
+    }
+  }
+  { name = libpipewire-module-loopback
+    args = {
+      node.description = "Lab headset microphone"
+      capture.props = { node.name = "lab-headset-mic-in" audio.position = [ MONO ] node.passive = true }
+      playback.props = { node.name = "lab-headset-mic" node.description = "Lab headset microphone" media.class = Audio/Source audio.position = [ MONO ] priority.session = 900 }
     }
   }
 ]
