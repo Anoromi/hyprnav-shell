@@ -286,6 +286,7 @@ test("a cycle starts before the current tab, or on the oldest backwards, and wra
 test("interpretInput tells URLs, domains and searches apart", () => {
   assert.deepEqual(M.interpretInput("linear.app/inbox"), { kind: "url", url: "https://linear.app/inbox" });
   assert.deepEqual(M.interpretInput("localhost:3000"), { kind: "url", url: "http://localhost:3000" });
+  assert.deepEqual(M.interpretInput("http://127.0.0.57:3000"), { kind: "url", url: "http://127.0.0.57:3000" });
   assert.deepEqual(M.interpretInput("how to nix"), { kind: "search", text: "how to nix" });
   assert.deepEqual(M.interpretInput("  "), { kind: "blank" });
 });

@@ -205,6 +205,12 @@ function deleteWord(query) {
     return (query || "").replace(/\S*\s*$/, "");
 }
 
+// Pasted text for the one-line query: verbatim, but a copied line's trailing
+// newline goes and inner line breaks become spaces.
+function pasteText(text) {
+    return (text || "").replace(/\s+$/, "").replace(/[\r\n\t]+/g, " ");
+}
+
 // What typing `prefix` means: the item whose hint it completes, or whether it
 // still starts some hint.
 function resolve(selectables, prefix) {

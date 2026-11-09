@@ -7,7 +7,7 @@ const path = require("node:path");
 // shell/grid/tabs.js is a QML `.pragma library` script: plain JS once the
 // pragma line is gone.
 const source = fs.readFileSync(path.join(__dirname, "../shell/grid/tabs.js"), "utf8").replace(/^\.pragma library\s*$/m, "");
-const T = new Function(`${source}; return { ALPHABET, LABELS, NEW_TAB_HINT, hintLabels, build, resolve, searchStart, hostOf, matches, deleteWord, flatRows, keyOps };`)();
+const T = new Function(`${source}; return { ALPHABET, LABELS, NEW_TAB_HINT, hintLabels, build, resolve, searchStart, hostOf, matches, deleteWord, pasteText, flatRows, keyOps };`)();
 
 test("hint labels stay prefix-free and short labels go first", () => {
   assert.deepEqual(T.hintLabels(3), ["h", "t", "s"], "right hand first, n left out");
@@ -221,6 +221,21 @@ test("deleteWord drops trailing spaces and the word before them", () => {
   assert.equal(T.deleteWord("   "), "");
   assert.equal(T.deleteWord(""), "");
   assert.equal(T.deleteWord("a.b/c d"), "a.b/c ");
+});
+
+test("pasteText keeps a URL verbatim and folds line breaks", () => {
+  assert.equal(T.pasteText("http://127.0.0.57:3000"), "http://127.0.0.57:3000");
+  assert.equal(T.pasteText("http://127.0.0.57:3000\n"), "http://127.0.0.57:3000");
+  assert.equal(T.pasteText("a\r\nb\tc"), "a b c");
+  assert.equal(T.pasteText(""), "");
+  const q = T.pasteText("http://127.0.0.57:3000");
+  const tabs = [
+    { id: "zen-1/1", windowId: "zen-1/1", index: 0, title: "dev", url: "http://127.0.0.57:3000/", browser: "zen" },
+    { id: "zen-1/2", windowId: "zen-1/1", index: 1, title: "other", url: "http://127.0.0.5:3000/", browser: "zen" },
+  ];
+  const m = T.build({ groups: [], tabs, browsers: ["zen"] }, q);
+  assert.deepEqual(m.sections.flatMap(s => s.items).map(x => x.url), ["http://127.0.0.57:3000/"]);
+  assert.equal(m.newTab.text, "http://127.0.0.57:3000");
 });
 
 test("entries name their browser only while several run", () => {

@@ -131,8 +131,9 @@ PanelWindow {
             Services.BrowserTabs.preview(item);
         }
     }
+    property bool queryAll: false      // Ctrl+A marked the whole query
     function setQuery(q) {
-        typedLast = true; settingQuery = true;
+        typedLast = true; settingQuery = true; queryAll = false;
         tabQuery = q; tabSel = TabsJs.searchStart(tabsModel.selectables, q);
         settingQuery = false;
         if (previewing) schedulePreview();
@@ -146,7 +147,7 @@ PanelWindow {
     function stopSearch() {
         const sel = selectedTab;
         if (sel && sel.kind === "entry" && sel.groupId && !expandedGroups[sel.groupId]) setExpanded(sel.groupId, true, true);
-        searching = false; tabQuery = "";
+        searching = false; tabQuery = ""; queryAll = false;
     }
     property string zone: "grid"       // grid | tabs
     property int tabSel: 0
@@ -265,7 +266,7 @@ PanelWindow {
         }
         selRow = pos.r; selCol = Math.max(0, Math.min(pos.c, (rs[pos.r]?.cells.length ?? 1) - 1));
         selEnv = rs[pos.r]?.envId ?? "";
-        zone = "grid"; hintPrefix = ""; searching = false; tabQuery = ""; typedLast = false; expandedGroups = ({});
+        zone = "grid"; hintPrefix = ""; searching = false; tabQuery = ""; queryAll = false; typedLast = false; expandedGroups = ({});
         userMoved = false;
     }
     // Hover selects only once the pointer has moved since the open (see
@@ -547,16 +548,27 @@ PanelWindow {
             const plain = !(ev.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier));
             if (win.searching) {
                 const ctrl = (ev.modifiers & Qt.ControlModifier) !== 0;
-                if (ctrl && (ev.key === Qt.Key_Backspace || ev.key === Qt.Key_W)) { win.setQuery(TabsJs.deleteWord(win.tabQuery)); ev.accepted = true; return; }
+                const shift = (ev.modifiers & Qt.ShiftModifier) !== 0;
+                // The field has no cursor: Ctrl+A marks the whole query, so
+                // typing or pasting replaces it; Ctrl+C and Ctrl+X take all of it.
+                const base = win.queryAll ? "" : win.tabQuery;
+                if (ctrl && ev.key === Qt.Key_A) { win.queryAll = win.tabQuery !== ""; ev.accepted = true; return; }
+                if (ctrl && (ev.key === Qt.Key_C || ev.key === Qt.Key_X)) {
+                    if (win.tabQuery !== "") Quickshell.clipboardText = win.tabQuery;
+                    if (ev.key === Qt.Key_X) win.setQuery("");
+                    ev.accepted = true; return;
+                }
+                if ((ctrl && ev.key === Qt.Key_V) || (shift && ev.key === Qt.Key_Insert)) { win.setQuery(base + TabsJs.pasteText(Quickshell.clipboardText)); ev.accepted = true; return; }
+                if (ctrl && (ev.key === Qt.Key_Backspace || ev.key === Qt.Key_W)) { win.setQuery(win.queryAll ? "" : TabsJs.deleteWord(win.tabQuery)); ev.accepted = true; return; }
                 if (ctrl && ev.key === Qt.Key_U) { win.setQuery(""); ev.accepted = true; return; }
                 switch (ev.key) {
                 case Qt.Key_Escape: if (win.tabQuery !== "") win.setQuery(""); else win.stopSearch(); break;
-                case Qt.Key_Backspace: win.setQuery(win.tabQuery.slice(0, -1)); break;
+                case Qt.Key_Backspace: win.setQuery(win.queryAll ? "" : win.tabQuery.slice(0, -1)); break;
                 case Qt.Key_Down: case Qt.Key_Tab: win.moveTab(1); break;
                 case Qt.Key_Up: case Qt.Key_Backtab: win.moveTab(-1); break;
                 case Qt.Key_Return: case Qt.Key_Enter: win.activate(); break;
                 default:
-                    if (plain && ev.text.length === 1 && ev.text >= " ") win.setQuery(win.tabQuery + ev.text);
+                    if (plain && ev.text.length === 1 && ev.text >= " ") win.setQuery(base + ev.text);
                     else return;
                 }
                 ev.accepted = true; return;
@@ -979,6 +991,7 @@ PanelWindow {
             prefix: win.hintPrefix
             searching: win.searching
             query: win.tabQuery
+            queryAll: win.queryAll
             live: win.open
             hoverArmed: hoverGate.armed
             onPointerMoved: (item, x, y) => hoverGate.moved(item, x, y)

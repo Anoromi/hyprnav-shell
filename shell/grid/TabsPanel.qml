@@ -21,6 +21,7 @@ Item {
     property string prefix: ""
     property bool searching: false     // hints hide while letters go to the query
     property string query: ""
+    property bool queryAll: false      // Ctrl+A marked the whole query
     property bool live: false          // the grid is open: hover may select
     property bool hoverArmed: false
     property string keyHints: ""
@@ -350,6 +351,12 @@ Item {
                 text: "󰍉"; size: 14
                 color: Theme.oPencil
             }
+            Rectangle {
+                visible: panel.queryAll
+                anchors.fill: queryText; anchors.margins: -1
+                radius: 2
+                color: Theme.oPencil
+            }
             Text {
                 id: queryText
                 anchors.verticalCenter: parent.verticalCenter
@@ -357,7 +364,7 @@ Item {
                 width: Math.min(implicitWidth, parent.width - x - Theme.s8)
                 elide: Text.ElideLeft
                 text: panel.query !== "" ? panel.query : "Search tabs"
-                color: panel.query !== "" ? Theme.oPaper : Theme.oFixer
+                color: panel.queryAll ? Theme.oDarkroom : panel.query !== "" ? Theme.oPaper : Theme.oFixer
                 font.family: Theme.sans; font.pixelSize: Theme.fs13
             }
             Rectangle {
