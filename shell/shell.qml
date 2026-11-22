@@ -36,7 +36,10 @@ ShellRoot {
     }
     // The notification server only runs when something shows notifications,
     // so a bar beside DMS never takes org.freedesktop.Notifications from it.
-    Component.onCompleted: Services.Notifs.enabled = hasComponent("popups") || hasComponent("center")
+    Component.onCompleted: {
+        Services.Notifs.enabled = hasComponent("popups") || hasComponent("center");
+        if (hasComponent("qs") || hasComponent("bar")) Services.Displays.init();
+    }
 
     // Popups, the OSD and IPC-opened sheets go to the focused screen.
     readonly property string focusedName: Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
@@ -209,6 +212,18 @@ ShellRoot {
                 nightLight: Services.NightLight.active, nightLightTool: Services.NightLight.tool,
                 powerProfile: PowerProfile.toString(PowerProfiles.profile) });
         }
+    }
+    IpcHandler {
+        target: "displays"
+        function refresh(): void { Services.Displays.refresh(false); }
+        function toggle(name: string): bool { return Services.Displays.toggle(name); }
+        function setEnabled(name: string, on: bool): bool { return Services.Displays.setEnabled(name, on); }
+        function preset(name: string): bool { return Services.Displays.applyPreset(name); }
+        function setMode(name: string, mode: string): bool { return Services.Displays.setMode(name, mode); }
+        function setScale(name: string, scale: real): bool { return Services.Displays.setScale(name, scale); }
+        function setPlacement(name: string, side: string): bool { return Services.Displays.setPlacement(name, side); }
+        function setTransform(name: string, transform: int): bool { return Services.Displays.setTransform(name, transform); }
+        function state(): string { return Services.Displays.stateJson(); }
     }
     IpcHandler {
         target: "center"

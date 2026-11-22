@@ -39,6 +39,7 @@ PanelWindow {
     WlrLayershell.keyboardFocus: !shown ? WlrKeyboardFocus.None : (claiming ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.OnDemand)
     property bool claiming: false
     onShownChanged: { claiming = shown; if (shown) claim.restart(); Services.Sheets.open += shown ? 1 : -1; }
+    Component.onDestruction: if (shown) Services.Sheets.open = Math.max(0, Services.Sheets.open - 1)
     Timer { id: claim; interval: 100; onTriggered: win.claiming = false }
     Connections { target: Services.Sheets; function onCloseAll() { win.close(); } }
     // Closed: an empty input region, clicks fall through to whatever is below.

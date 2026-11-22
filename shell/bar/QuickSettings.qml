@@ -35,7 +35,7 @@ SheetWindow {
     id: qs
     required property var modelData
     screen: modelData
-    property string section: "wifi"      // wifi | bluetooth | sound
+    property string section: "wifi"      // wifi | bluetooth | sound | displays
 
     anchors { top: true; bottom: true; left: true }
     margins { top: 8; bottom: 8; left: 52 }
@@ -44,12 +44,13 @@ SheetWindow {
     WlrLayershell.namespace: "hyprnav-shell-quicksettings"
 
     PerfProbe { id: perf; label: "qs" }
-    onOpened: { perf.arm("open " + section); bar.refresh(); Services.NightLight.probe(); focusList(); }
-    onSectionChanged: if (shown) focusList()
+    onOpened: { perf.arm("open " + section); bar.refresh(); Services.NightLight.probe(); Services.Displays.refresh(false); focusList(); }
+    onSectionChanged: if (shown) { if (section === "displays") Services.Displays.refresh(false); focusList(); }
     // The visible list takes the keys (Up/Down/PageUp/PageDown/Home/End); Esc
     // is not taken and reaches the sheet.
     function focusList() {
         Qt.callLater(() => {
+            if (section === "displays") return;
             const l = section === "wifi" ? wifiList : section === "bluetooth" ? btList : sinkList;
             if (qs.pendingNetwork === null) l.view.forceActiveFocus();
         });
@@ -103,7 +104,7 @@ SheetWindow {
     }
     Timer { id: debounce; interval: 250; onTriggered: bar.refresh() }
     // Order can change without the count changing (a connect, a stronger AP).
-    Timer { interval: 2000; repeat: true; running: qs.shown && qs.section !== "sound"; onTriggered: bar.refresh() }
+    Timer { interval: 2000; repeat: true; running: qs.shown && (qs.section === "wifi" || qs.section === "bluetooth"); onTriggered: bar.refresh() }
     // Scan only when someone is looking at the list.
     Timer {
         id: scanWait
@@ -283,7 +284,11 @@ SheetWindow {
                 model: [
                     { id: "wifi", glyph: bar.wifiOn ? "󰖩" : "󰖪", label: bar.connectedNet ? bar.connectedNet.name : (bar.wifiOn ? "Wi-Fi" : "Wi-Fi off") },
                     { id: "bluetooth", glyph: bar.btConnected > 0 ? "󰂱" : "󰂯", label: bar.btAdapter && bar.btAdapter.enabled ? (bar.btConnected + " connected") : "Bluetooth off" },
-                    { id: "sound", glyph: Services.Audio.icon(), label: Services.Audio.muted ? "Muted" : Math.round(Services.Audio.volume * 100) + "%" }
+                    { id: "sound", glyph: Services.Audio.icon(), label: Services.Audio.muted ? "Muted" : Math.round(Services.Audio.volume * 100) + "%" },
+                    { id: "displays", glyph: Services.Displays.activeCount > 1 ? "󰍺" : "󰍹",
+                      label: Services.Displays.connectedCount > 1
+                          ? (Services.Displays.activeCount + " of " + Services.Displays.connectedCount + " on")
+                          : (Services.Displays.connectedCount === 1 ? "1 display" : "Displays") }
                 ]
                 Pressable {
                     id: tab
@@ -516,6 +521,12 @@ SheetWindow {
                 }
             }
             ScrollEdges { visible: soundFlick.visible; anchors.fill: soundFlick; flick: soundFlick; step: Theme.rowH }
+
+            DisplaysView {
+                id: displaysView
+                visible: qs.section === "displays"
+                anchors.fill: parent
+            }
         }
     }
 
