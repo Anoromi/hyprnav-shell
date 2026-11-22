@@ -109,6 +109,12 @@ PanelWindow {
         onHoveredChanged: hovered ? bar.tip(btn, btn.label) : bar.untip()
     }
     TrayMenu { id: trayMenu; bar: bar }
+    LayoutMenu { id: layoutMenu; bar: bar }
+    Connections {
+        target: bar.quickSettings
+        ignoreUnknownSignals: true
+        function onOpened() { layoutMenu.close(); }
+    }
 
     component Cell: Item {
         property alias text: g.text
@@ -416,6 +422,46 @@ PanelWindow {
             }
             onClicked: if (bar.quickSettings) bar.quickSettings.toggle()
             onHoveredChanged: hovered ? bar.tip(cluster, bar.clusterLabel()) : bar.untip()
+        }
+
+        // Keyboard layout badge: quiet Paper on the primary layout, Pencil on
+        // secondary layouts so a switched layout stands out at a glance. Left
+        // click opens the layout picker beside the bar; right click or wheel
+        // cycles directly.
+        Pressable {
+            id: kbBadge
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: 32; height: 26
+            outlined: true
+            active: layoutMenu.shown
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            Text {
+                anchors.centerIn: parent
+                text: Services.Keyboard.code
+                color: layoutMenu.shown || Services.Keyboard.activeIndex !== 0 ? Theme.pencil : Theme.paper
+                font.family: Theme.mono
+                font.pixelSize: Theme.fs12
+                font.weight: Services.Keyboard.activeIndex !== 0 ? Font.Bold : Font.Medium
+            }
+            onClicked: m => {
+                bar.untip();
+                if (m.button === Qt.RightButton) {
+                    Services.Keyboard.next();
+                    return;
+                }
+                if (layoutMenu.shown) {
+                    layoutMenu.close();
+                } else {
+                    const p = kbBadge.mapToItem(null, 0, 0);
+                    Services.Sheets.closeAll();
+                    layoutMenu.open(p.y);
+                }
+            }
+            onWheel: w => {
+                if (w.angleDelta.y < 0) Services.Keyboard.next();
+                else if (w.angleDelta.y > 0) Services.Keyboard.prev();
+            }
+            onHoveredChanged: hovered ? bar.tip(kbBadge, Services.Keyboard.label + "\nClick to switch · Right-click to cycle") : bar.untip()
         }
 
         Hair { opacity: SystemTray.items.values.length > 0 ? 1 : 0 }

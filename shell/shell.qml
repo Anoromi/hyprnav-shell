@@ -38,7 +38,10 @@ ShellRoot {
     // so a bar beside DMS never takes org.freedesktop.Notifications from it.
     Component.onCompleted: {
         Services.Notifs.enabled = hasComponent("popups") || hasComponent("center");
-        if (hasComponent("qs") || hasComponent("bar")) Services.Displays.init();
+        if (hasComponent("qs") || hasComponent("bar")) {
+            Services.Displays.init();
+            Services.Keyboard.init();
+        }
     }
 
     // Popups, the OSD and IPC-opened sheets go to the focused screen.
@@ -212,6 +215,14 @@ ShellRoot {
                 nightLight: Services.NightLight.active, nightLightTool: Services.NightLight.tool,
                 powerProfile: PowerProfile.toString(PowerProfiles.profile) });
         }
+    }
+    IpcHandler {
+        target: "keyboard"
+        function refresh(): void { Services.Keyboard.refresh(); }
+        function set(index: int): bool { return Services.Keyboard.setLayout(index); }
+        function next(): bool { return Services.Keyboard.next(); }
+        function prev(): bool { return Services.Keyboard.prev(); }
+        function state(): string { return Services.Keyboard.stateJson(); }
     }
     IpcHandler {
         target: "displays"

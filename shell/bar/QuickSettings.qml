@@ -44,7 +44,7 @@ SheetWindow {
     WlrLayershell.namespace: "hyprnav-shell-quicksettings"
 
     PerfProbe { id: perf; label: "qs" }
-    onOpened: { perf.arm("open " + section); bar.refresh(); Services.NightLight.probe(); Services.Displays.refresh(false); focusList(); }
+    onOpened: { perf.arm("open " + section); bar.refresh(); Services.NightLight.probe(); Services.Displays.refresh(false); Services.Keyboard.refresh(); focusList(); }
     onSectionChanged: if (shown) { if (section === "displays") Services.Displays.refresh(false); focusList(); }
     // The visible list takes the keys (Up/Down/PageUp/PageDown/Home/End); Esc
     // is not taken and reaches the sheet.
@@ -271,6 +271,38 @@ SheetWindow {
                         Text { text: seg.modelData.label; color: seg.on ? Theme.paper : Theme.fixer; font.family: Theme.sans; font.pixelSize: Theme.fs13; anchors.verticalCenter: parent.verticalCenter }
                     }
                     onClicked: PowerProfiles.profile = seg.modelData.p
+                }
+            }
+        }
+
+        // Keyboard layout switcher (shown when multiple layouts are configured).
+        RowLayout {
+            visible: Services.Keyboard.multiple
+            Layout.fillWidth: true
+            spacing: Theme.s4
+            Item {
+                implicitWidth: 24; implicitHeight: 28
+                Glyph { anchors.centerIn: parent; text: "󰌌"; size: 15; color: Theme.fixer }
+            }
+            Repeater {
+                model: Services.Keyboard.layouts
+                Pressable {
+                    id: kbSeg
+                    required property var modelData
+                    readonly property bool on: Services.Keyboard.activeIndex === modelData.index
+                    Layout.fillWidth: true
+                    implicitHeight: 28
+                    active: on
+                    outlined: true
+                    Text {
+                        anchors.centerIn: parent
+                        text: kbSeg.modelData.code
+                        color: kbSeg.on ? Theme.pencil : Theme.fixer
+                        font.family: Theme.mono
+                        font.pixelSize: Theme.fs12
+                        font.weight: kbSeg.on ? Font.Bold : Font.Normal
+                    }
+                    onClicked: Services.Keyboard.setLayout(kbSeg.modelData.index)
                 }
             }
         }
