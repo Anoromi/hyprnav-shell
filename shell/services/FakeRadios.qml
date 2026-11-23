@@ -57,11 +57,13 @@ Singleton {
         property bool connected: false
         property bool paired: false
         property bool pairing: false
+        property bool trusted: false
         property bool batteryAvailable: false
         property real battery: 0
         property int state: connected ? BluetoothDeviceState.Connected : BluetoothDeviceState.Disconnected
         function connect() { dev.paired = true; dev.connected = true; }
         function disconnect() { dev.connected = false; }
+        function pair() { dev.paired = true; }
         function cancelPair() { dev.pairing = false; }
         function forget() {
             dev.connected = false;

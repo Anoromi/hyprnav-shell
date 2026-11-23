@@ -45,17 +45,17 @@ SheetWindow {
 
     PerfProbe { id: perf; label: "qs" }
     onOpened: { perf.arm("open " + section); bar.refresh(); Services.NightLight.probe(); Services.Displays.refresh(false); Services.Keyboard.refresh(); focusList(); }
-    onSectionChanged: { confirmForgetTarget = null; if (shown) { if (section === "displays") Services.Displays.refresh(false); focusList(); } }
+    onSectionChanged: { contextMenu.close(); if (shown) { if (section === "displays") Services.Displays.refresh(false); focusList(); } }
     // The visible list takes the keys (Up/Down/PageUp/PageDown/Home/End); Esc
     // is not taken and reaches the sheet.
     function focusList() {
         Qt.callLater(() => {
             if (section === "displays") return;
             const l = section === "wifi" ? wifiList : section === "bluetooth" ? btList : sinkList;
-            if (qs.pendingNetwork === null) l.view.forceActiveFocus();
+            if (qs.pendingNetwork === null && !contextMenu.shown) l.view.forceActiveFocus();
         });
     }
-    onDismissed: { if (bar.wifiDev) bar.wifiDev.scannerEnabled = false; pendingNetwork = null; confirmForgetTarget = null; }
+    onDismissed: { if (bar.wifiDev) bar.wifiDev.scannerEnabled = false; pendingNetwork = null; contextMenu.close(); }
 
     // Shared lookups. `networks` and `btDevices` are refreshed on a short
     // debounce while the sheet is open and assigned only when they differ.
@@ -115,20 +115,65 @@ SheetWindow {
     property var pendingNetwork: null   // network awaiting a password
     onPendingNetworkChanged: if (pendingNetwork !== null) Qt.callLater(() => pw.forceActiveFocus())
 
-    // Two-step inline confirmation for forgetting a Wi-Fi network or Bluetooth
-    // device: first click arms the row, second click executes forget().
-    property var confirmForgetTarget: null
-    Timer { id: forgetReset; interval: 3500; onTriggered: qs.confirmForgetTarget = null }
-    function armOrForget(target, doForget) {
-        if (confirmForgetTarget === target) {
-            forgetReset.stop();
-            confirmForgetTarget = null;
-            doForget();
-            debounce.restart();
+    function copyText(text) {
+        if (!text) return;
+        Quickshell.execDetached(["wl-copy", "--", String(text)]);
+    }
+
+    function openNetMenu(row, mouse, n) {
+        const p = row.mapToItem(qs.sheet, mouse ? mouse.x : row.width - 24, mouse ? mouse.y : row.height / 2);
+        const items = [];
+        if (n.connected) {
+            items.push({ label: "Disconnect", glyph: "󰖪", action: () => { n.disconnect(); debounce.restart(); } });
         } else {
-            confirmForgetTarget = target;
-            forgetReset.restart();
+            items.push({
+                label: "Connect",
+                glyph: "󰖩",
+                action: () => {
+                    if (n.known || n.security === WifiSecurityType.Open) n.connect();
+                    else qs.pendingNetwork = n;
+                }
+            });
         }
+        if (n.name) {
+            items.push({ label: "Copy network name", glyph: "󰆏", action: () => qs.copyText(n.name) });
+        }
+        if (n.known || n.connected) {
+            items.push({ separator: true });
+            items.push({ label: "Forget network", glyph: "󰩹", danger: true, action: () => { n.forget(); debounce.restart(); } });
+        }
+        contextMenu.open(p.x, p.y, n.name || "Hidden network", items);
+    }
+
+    function openBtMenu(row, mouse, d) {
+        const p = row.mapToItem(qs.sheet, mouse ? mouse.x : row.width - 24, mouse ? mouse.y : row.height / 2);
+        const items = [];
+        if (d.pairing === true) {
+            items.push({ label: "Cancel pairing", glyph: "󰅖", action: () => { d.cancelPair(); debounce.restart(); } });
+        } else if (d.connected) {
+            items.push({ label: "Disconnect", glyph: "󰂲", action: () => { d.disconnect(); debounce.restart(); } });
+        } else {
+            items.push({ label: "Connect", glyph: "󰂱", action: () => { d.connect(); debounce.restart(); } });
+            if (!d.paired && typeof d.pair === "function") {
+                items.push({ label: "Pair", glyph: "󰂯", action: () => { d.pair(); debounce.restart(); } });
+            }
+        }
+        if ((d.paired || d.connected) && d.trusted !== undefined) {
+            items.push({
+                label: d.trusted ? "Trusted" : "Trust device",
+                glyph: "󰒃",
+                checked: d.trusted === true,
+                action: () => { d.trusted = !d.trusted; }
+            });
+        }
+        if (d.address) {
+            items.push({ label: "Copy address", glyph: "󰆏", action: () => qs.copyText(d.address) });
+        }
+        if (d.paired || d.connected) {
+            items.push({ separator: true });
+            items.push({ label: "Forget device", glyph: "󰩹", danger: true, action: () => { d.forget(); debounce.restart(); } });
+        }
+        contextMenu.open(p.x, p.y, d.name || d.address, items);
     }
 
     function batteryState() {
@@ -176,127 +221,75 @@ SheetWindow {
     readonly property int statusW: Math.ceil(statusMetrics.advanceWidth)
     component Hairline: Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.emulsion }
 
-    // Compact action button used inside Wi-Fi and Bluetooth rows.
-    component RowActionBtn: Pressable {
-        id: actBtn
-        property string label: ""
-        property string glyph: ""
-        property bool danger: false
-        implicitWidth: label !== "" ? (actLbl.implicitWidth + 12) : 24
-        implicitHeight: 24
-        outlined: label !== "" || danger
-        color: danger ? Qt.rgba(0.878, 0.424, 0.294, hovered ? 0.30 : 0.18)
-            : (hovered ? Theme.emulsion : "transparent")
-        border.color: danger ? Theme.warn : (hovered ? Theme.fixer : Theme.emulsion)
-        Text {
-            id: actLbl
-            visible: actBtn.label !== ""
-            anchors.centerIn: parent
-            text: actBtn.label
-            color: actBtn.danger ? Theme.warn : (actBtn.hovered ? Theme.paper : Theme.fixer)
-            font.family: Theme.sans
-            font.pixelSize: 11
-            font.weight: actBtn.danger ? Font.Medium : Font.Normal
-        }
-        Glyph {
-            visible: actBtn.label === "" && actBtn.glyph !== ""
-            anchors.centerIn: parent
-            text: actBtn.glyph
-            size: 14
-            color: actBtn.danger ? Theme.warn : (actBtn.hovered ? Theme.paper : Theme.fixer)
-        }
-    }
-
     // One network. Used for the pinned connected row and the list rows.
+    // Left-click connects (or opens the context menu on the active network);
+    // right-click opens the context menu on any network.
     component NetRow: Pressable {
         id: netRow
         required property var modelData
-        readonly property bool armed: qs.confirmForgetTarget === modelData
         readonly property bool disconnecting: modelData.state === ConnectionState.Disconnecting
         width: ListView.view ? ListView.view.width : (parent ? parent.width : 0)
         implicitHeight: Theme.rowH
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
         Component.onCompleted: if (perf.enabled) console.info("[perf] qs wifi row created " + modelData.name)
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
-            spacing: 6
+            spacing: Theme.s8
             Glyph { text: netRow.modelData.signalStrength > 0.8 ? "󰤨" : netRow.modelData.signalStrength > 0.55 ? "󰤥" : netRow.modelData.signalStrength > 0.3 ? "󰤢" : "󰤟"; color: netRow.modelData.connected ? Theme.pencil : Theme.paper }
             Text { text: netRow.modelData.name || "Hidden network"; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13; font.weight: netRow.modelData.connected ? Font.Medium : Font.Normal; Layout.fillWidth: true; elide: Text.ElideRight }
-            Glyph { visible: netRow.modelData.security !== WifiSecurityType.Open && !netRow.armed; text: "󰌾"; size: 12; color: Theme.fixer }
+            Glyph { visible: netRow.modelData.security !== WifiSecurityType.Open; text: "󰌾"; size: 12; color: Theme.fixer }
             Meta {
-                readonly property string statusText: netRow.disconnecting ? "disconnecting" : (netRow.modelData.stateChanging ? "connecting" : (netRow.modelData.known ? "saved" : ""))
-                visible: !netRow.armed && !netRow.modelData.connected && statusText !== ""
+                Layout.preferredWidth: qs.statusW
                 horizontalAlignment: Text.AlignRight
-                text: statusText
-                color: Theme.fixer
-            }
-            RowActionBtn {
-                visible: netRow.modelData.connected && !netRow.armed
-                label: netRow.disconnecting ? "…" : "Disconnect"
-                interactive: !netRow.disconnecting
-                onClicked: { netRow.modelData.disconnect(); debounce.restart(); }
-            }
-            RowActionBtn {
-                visible: netRow.modelData.known || netRow.modelData.connected
-                label: netRow.armed ? "Forget?" : ""
-                glyph: "󰩹"
-                danger: netRow.armed
-                opacity: netRow.armed || netRow.hovered || hovered ? 1 : 0.55
-                onClicked: qs.armOrForget(netRow.modelData, () => netRow.modelData.forget())
+                text: netRow.disconnecting ? "disconnecting" : (netRow.modelData.connected ? "connected" : (netRow.modelData.stateChanging ? "connecting" : (netRow.modelData.known ? "saved" : "")))
+                color: netRow.modelData.connected && !netRow.disconnecting ? Theme.good : Theme.fixer
             }
         }
-        onClicked: {
+        onClicked: m => {
             const n = netRow.modelData;
-            if (n.connected) return;
+            if (m.button === Qt.RightButton || n.connected) {
+                qs.openNetMenu(netRow, m, n);
+                return;
+            }
             if (n.known || n.security === WifiSecurityType.Open) n.connect();
             else qs.pendingNetwork = n;
         }
     }
 
     // One Bluetooth device, pinned or in the list.
+    // Left-click toggles connection; right-click opens the context menu.
     component BtRow: Pressable {
         id: btRow
         required property var modelData
-        readonly property bool armed: qs.confirmForgetTarget === modelData
         readonly property bool isConnecting: modelData.state === BluetoothDeviceState.Connecting
         readonly property bool isDisconnecting: modelData.state === BluetoothDeviceState.Disconnecting
         readonly property bool isPairing: modelData.pairing === true
         width: ListView.view ? ListView.view.width : (parent ? parent.width : 0)
         implicitHeight: Theme.rowH
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
         Component.onCompleted: if (perf.enabled) console.info("[perf] qs bt row created " + modelData.name)
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
-            spacing: 6
+            spacing: Theme.s8
             Glyph { text: btRow.modelData.connected ? "󰂱" : "󰂯"; color: btRow.modelData.connected ? Theme.pencil : Theme.paper }
             Text { text: btRow.modelData.name || btRow.modelData.address; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13; font.weight: btRow.modelData.connected ? Font.Medium : Font.Normal; Layout.fillWidth: true; elide: Text.ElideRight }
-            Text { visible: btRow.modelData.batteryAvailable && !btRow.armed; text: Math.round(btRow.modelData.battery * 100) + "%"; color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs12 }
+            Text { visible: btRow.modelData.batteryAvailable; text: Math.round(btRow.modelData.battery * 100) + "%"; color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs12 }
             Meta {
-                readonly property string statusText: btRow.isDisconnecting ? "disconnecting" : (btRow.isConnecting ? "connecting" : (btRow.modelData.paired ? "paired" : ""))
-                visible: !btRow.armed && !btRow.modelData.connected && !btRow.isPairing && statusText !== ""
+                Layout.preferredWidth: qs.statusW
                 horizontalAlignment: Text.AlignRight
-                text: statusText
-                color: Theme.fixer
-            }
-            RowActionBtn {
-                visible: btRow.isPairing && !btRow.armed
-                label: "Cancel"
-                onClicked: { btRow.modelData.cancelPair(); debounce.restart(); }
-            }
-            RowActionBtn {
-                visible: btRow.modelData.connected && !btRow.armed
-                label: btRow.isDisconnecting ? "…" : "Disconnect"
-                interactive: !btRow.isDisconnecting
-                onClicked: { btRow.modelData.disconnect(); debounce.restart(); }
-            }
-            RowActionBtn {
-                visible: btRow.modelData.paired || btRow.modelData.connected
-                label: btRow.armed ? "Forget?" : ""
-                glyph: "󰩹"
-                danger: btRow.armed
-                opacity: btRow.armed || btRow.hovered || hovered ? 1 : 0.55
-                onClicked: qs.armOrForget(btRow.modelData, () => btRow.modelData.forget())
+                text: btRow.isPairing ? "pairing" : (btRow.isDisconnecting ? "disconnecting" : (btRow.modelData.connected ? "connected" : (btRow.isConnecting ? "connecting" : (btRow.modelData.paired ? "paired" : ""))))
+                color: btRow.modelData.connected && !btRow.isDisconnecting ? Theme.good : Theme.fixer
             }
         }
-        onClicked: { const d = btRow.modelData; if (d.connected) d.disconnect(); else d.connect(); }
+        onClicked: m => {
+            const d = btRow.modelData;
+            if (m.button === Qt.RightButton) {
+                qs.openBtMenu(btRow, m, d);
+                return;
+            }
+            if (d.connected) d.disconnect();
+            else d.connect();
+        }
     }
 
     ColumnLayout {
@@ -658,6 +651,11 @@ SheetWindow {
                 anchors.fill: parent
             }
         }
+    }
+
+    ContextMenu {
+        id: contextMenu
+        onClosed: if (qs.shown) qs.focusList()
     }
 
     // An output or input in the sound view: a tick on the default one.
