@@ -45,7 +45,7 @@ SheetWindow {
 
     PerfProbe { id: perf; label: "qs" }
     onOpened: { perf.arm("open " + section); bar.refresh(); Services.NightLight.probe(); Services.Displays.refresh(false); Services.Keyboard.refresh(); focusList(); }
-    onSectionChanged: if (shown) { if (section === "displays") Services.Displays.refresh(false); focusList(); }
+    onSectionChanged: { confirmForgetTarget = null; if (shown) { if (section === "displays") Services.Displays.refresh(false); focusList(); } }
     // The visible list takes the keys (Up/Down/PageUp/PageDown/Home/End); Esc
     // is not taken and reaches the sheet.
     function focusList() {
@@ -55,7 +55,7 @@ SheetWindow {
             if (qs.pendingNetwork === null) l.view.forceActiveFocus();
         });
     }
-    onDismissed: { if (bar.wifiDev) bar.wifiDev.scannerEnabled = false; pendingNetwork = null; }
+    onDismissed: { if (bar.wifiDev) bar.wifiDev.scannerEnabled = false; pendingNetwork = null; confirmForgetTarget = null; }
 
     // Shared lookups. `networks` and `btDevices` are refreshed on a short
     // debounce while the sheet is open and assigned only when they differ.
@@ -115,6 +115,22 @@ SheetWindow {
     property var pendingNetwork: null   // network awaiting a password
     onPendingNetworkChanged: if (pendingNetwork !== null) Qt.callLater(() => pw.forceActiveFocus())
 
+    // Two-step inline confirmation for forgetting a Wi-Fi network or Bluetooth
+    // device: first click arms the row, second click executes forget().
+    property var confirmForgetTarget: null
+    Timer { id: forgetReset; interval: 3500; onTriggered: qs.confirmForgetTarget = null }
+    function armOrForget(target, doForget) {
+        if (confirmForgetTarget === target) {
+            forgetReset.stop();
+            confirmForgetTarget = null;
+            doForget();
+            debounce.restart();
+        } else {
+            confirmForgetTarget = target;
+            forgetReset.restart();
+        }
+    }
+
     function batteryState() {
         const b = bar.battery; if (!b) return "";
         const pct = Math.round(b.percentage * 100) + "%";
@@ -160,20 +176,73 @@ SheetWindow {
     readonly property int statusW: Math.ceil(statusMetrics.advanceWidth)
     component Hairline: Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.emulsion }
 
+    // Compact action button used inside Wi-Fi and Bluetooth rows.
+    component RowActionBtn: Pressable {
+        id: actBtn
+        property string label: ""
+        property string glyph: ""
+        property bool danger: false
+        implicitWidth: label !== "" ? (actLbl.implicitWidth + 12) : 24
+        implicitHeight: 24
+        outlined: label !== "" || danger
+        color: danger ? Qt.rgba(0.878, 0.424, 0.294, hovered ? 0.30 : 0.18)
+            : (hovered ? Theme.emulsion : "transparent")
+        border.color: danger ? Theme.warn : (hovered ? Theme.fixer : Theme.emulsion)
+        Text {
+            id: actLbl
+            visible: actBtn.label !== ""
+            anchors.centerIn: parent
+            text: actBtn.label
+            color: actBtn.danger ? Theme.warn : (actBtn.hovered ? Theme.paper : Theme.fixer)
+            font.family: Theme.sans
+            font.pixelSize: 11
+            font.weight: actBtn.danger ? Font.Medium : Font.Normal
+        }
+        Glyph {
+            visible: actBtn.label === "" && actBtn.glyph !== ""
+            anchors.centerIn: parent
+            text: actBtn.glyph
+            size: 14
+            color: actBtn.danger ? Theme.warn : (actBtn.hovered ? Theme.paper : Theme.fixer)
+        }
+    }
+
     // One network. Used for the pinned connected row and the list rows.
     component NetRow: Pressable {
         id: netRow
         required property var modelData
+        readonly property bool armed: qs.confirmForgetTarget === modelData
+        readonly property bool disconnecting: modelData.state === ConnectionState.Disconnecting
         width: ListView.view ? ListView.view.width : (parent ? parent.width : 0)
         implicitHeight: Theme.rowH
         Component.onCompleted: if (perf.enabled) console.info("[perf] qs wifi row created " + modelData.name)
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
-            spacing: Theme.s8
+            spacing: 6
             Glyph { text: netRow.modelData.signalStrength > 0.8 ? "󰤨" : netRow.modelData.signalStrength > 0.55 ? "󰤥" : netRow.modelData.signalStrength > 0.3 ? "󰤢" : "󰤟"; color: netRow.modelData.connected ? Theme.pencil : Theme.paper }
             Text { text: netRow.modelData.name || "Hidden network"; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13; font.weight: netRow.modelData.connected ? Font.Medium : Font.Normal; Layout.fillWidth: true; elide: Text.ElideRight }
-            Glyph { visible: netRow.modelData.security !== WifiSecurityType.Open; text: "󰌾"; size: 12; color: Theme.fixer }
-            Meta { Layout.preferredWidth: qs.statusW; horizontalAlignment: Text.AlignRight; text: netRow.modelData.connected ? "connected" : (netRow.modelData.stateChanging ? "connecting" : (netRow.modelData.known ? "saved" : "")); color: netRow.modelData.connected ? Theme.good : Theme.fixer }
+            Glyph { visible: netRow.modelData.security !== WifiSecurityType.Open && !netRow.armed; text: "󰌾"; size: 12; color: Theme.fixer }
+            Meta {
+                readonly property string statusText: netRow.disconnecting ? "disconnecting" : (netRow.modelData.stateChanging ? "connecting" : (netRow.modelData.known ? "saved" : ""))
+                visible: !netRow.armed && !netRow.modelData.connected && statusText !== ""
+                horizontalAlignment: Text.AlignRight
+                text: statusText
+                color: Theme.fixer
+            }
+            RowActionBtn {
+                visible: netRow.modelData.connected && !netRow.armed
+                label: netRow.disconnecting ? "…" : "Disconnect"
+                interactive: !netRow.disconnecting
+                onClicked: { netRow.modelData.disconnect(); debounce.restart(); }
+            }
+            RowActionBtn {
+                visible: netRow.modelData.known || netRow.modelData.connected
+                label: netRow.armed ? "Forget?" : ""
+                glyph: "󰩹"
+                danger: netRow.armed
+                opacity: netRow.armed || netRow.hovered || hovered ? 1 : 0.55
+                onClicked: qs.armOrForget(netRow.modelData, () => netRow.modelData.forget())
+            }
         }
         onClicked: {
             const n = netRow.modelData;
@@ -187,16 +256,45 @@ SheetWindow {
     component BtRow: Pressable {
         id: btRow
         required property var modelData
+        readonly property bool armed: qs.confirmForgetTarget === modelData
+        readonly property bool isConnecting: modelData.state === BluetoothDeviceState.Connecting
+        readonly property bool isDisconnecting: modelData.state === BluetoothDeviceState.Disconnecting
+        readonly property bool isPairing: modelData.pairing === true
         width: ListView.view ? ListView.view.width : (parent ? parent.width : 0)
         implicitHeight: Theme.rowH
         Component.onCompleted: if (perf.enabled) console.info("[perf] qs bt row created " + modelData.name)
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: Theme.s8; anchors.rightMargin: Theme.s8
-            spacing: Theme.s8
+            spacing: 6
             Glyph { text: btRow.modelData.connected ? "󰂱" : "󰂯"; color: btRow.modelData.connected ? Theme.pencil : Theme.paper }
-            Text { text: btRow.modelData.name || btRow.modelData.address; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13; Layout.fillWidth: true; elide: Text.ElideRight }
-            Text { visible: btRow.modelData.batteryAvailable; text: Math.round(btRow.modelData.battery * 100) + "%"; color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs12 }
-            Meta { Layout.preferredWidth: qs.statusW; horizontalAlignment: Text.AlignRight; text: btRow.modelData.connected ? "connected" : (btRow.modelData.state === BluetoothDeviceState.Connecting ? "connecting" : (btRow.modelData.paired ? "paired" : "")); color: btRow.modelData.connected ? Theme.good : Theme.fixer }
+            Text { text: btRow.modelData.name || btRow.modelData.address; color: Theme.paper; font.family: Theme.sans; font.pixelSize: Theme.fs13; font.weight: btRow.modelData.connected ? Font.Medium : Font.Normal; Layout.fillWidth: true; elide: Text.ElideRight }
+            Text { visible: btRow.modelData.batteryAvailable && !btRow.armed; text: Math.round(btRow.modelData.battery * 100) + "%"; color: Theme.fixer; font.family: Theme.mono; font.pixelSize: Theme.fs12 }
+            Meta {
+                readonly property string statusText: btRow.isDisconnecting ? "disconnecting" : (btRow.isConnecting ? "connecting" : (btRow.modelData.paired ? "paired" : ""))
+                visible: !btRow.armed && !btRow.modelData.connected && !btRow.isPairing && statusText !== ""
+                horizontalAlignment: Text.AlignRight
+                text: statusText
+                color: Theme.fixer
+            }
+            RowActionBtn {
+                visible: btRow.isPairing && !btRow.armed
+                label: "Cancel"
+                onClicked: { btRow.modelData.cancelPair(); debounce.restart(); }
+            }
+            RowActionBtn {
+                visible: btRow.modelData.connected && !btRow.armed
+                label: btRow.isDisconnecting ? "…" : "Disconnect"
+                interactive: !btRow.isDisconnecting
+                onClicked: { btRow.modelData.disconnect(); debounce.restart(); }
+            }
+            RowActionBtn {
+                visible: btRow.modelData.paired || btRow.modelData.connected
+                label: btRow.armed ? "Forget?" : ""
+                glyph: "󰩹"
+                danger: btRow.armed
+                opacity: btRow.armed || btRow.hovered || hovered ? 1 : 0.55
+                onClicked: qs.armOrForget(btRow.modelData, () => btRow.modelData.forget())
+            }
         }
         onClicked: { const d = btRow.modelData; if (d.connected) d.disconnect(); else d.connect(); }
     }

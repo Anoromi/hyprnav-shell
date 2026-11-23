@@ -43,9 +43,12 @@ Singleton {
         property bool known: false
         property int security: WifiSecurityType.Wpa2Psk
         property bool stateChanging: false
+        property int state: connected ? ConnectionState.Connected : ConnectionState.Disconnected
         property real base: 0.5
         function connect() { root.connectNetwork(net); }
         function connectWithPsk(psk) { net.known = true; root.connectNetwork(net); }
+        function disconnect() { net.connected = false; }
+        function forget() { net.connected = false; net.known = false; }
     }
     component FakeDevice: QtObject {
         id: dev
@@ -53,11 +56,19 @@ Singleton {
         property string address
         property bool connected: false
         property bool paired: false
+        property bool pairing: false
         property bool batteryAvailable: false
         property real battery: 0
         property int state: connected ? BluetoothDeviceState.Connected : BluetoothDeviceState.Disconnected
         function connect() { dev.paired = true; dev.connected = true; }
         function disconnect() { dev.connected = false; }
+        function cancelPair() { dev.pairing = false; }
+        function forget() {
+            dev.connected = false;
+            dev.paired = false;
+            btAdapter.devices.values = btAdapter.devices.values.filter(x => x !== dev);
+            Qt.callLater(() => dev.destroy());
+        }
     }
     Component { id: netComp; FakeNetwork {} }
     Component { id: devComp; FakeDevice {} }
